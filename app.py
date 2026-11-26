@@ -1358,21 +1358,11 @@ elif menu == "📅 7. Calendario de Actividades":
                         chips_html = ""
                         for a in acts_del_dia:
                             estilo = CAL_ESTILOS.get(a["tipo_actividad"], ESTILO_DEFAULT)
-                            tachado = "text-decoration: line-through; opacity: 0.6;" if a["completada"] == 1 else ""
-                            chips_html += f"""
-                            <div style="background-color: {estilo['bg']}; border-left: 3px solid {estilo['chip']}; color: {estilo['text']}; padding: 2px 4px; border-radius: 3px; font-size: 0.72rem; margin-top: 3px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; {tachado}" title="{a['tipo_actividad']}: {a['titulo']}">
-                                {a['titulo']}
-                            </div>
-                            """
+                            tachado = "text-decoration:line-through;opacity:0.6;" if a["completada"] == 1 else ""
+                            chips_html += f'<div style="background-color:{estilo["bg"]};border-left:3px solid {estilo["chip"]};color:{estilo["text"]};padding:2px 5px;border-radius:3px;font-size:0.73rem;margin-top:3px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;{tachado}" title="{a["tipo_actividad"]}: {a["titulo"]}">{a["titulo"]}</div>'
 
-                        st.markdown(f"""
-                        <div style="min-height:95px; background-color:#FFFFFF; border:{b_border}; border-radius:6px; padding:5px; margin-bottom:5px; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                                {num_badge}
-                            </div>
-                            {chips_html}
-                        </div>
-                        """, unsafe_allow_html=True)
+                        cell_html = f'<div style="min-height:95px;background-color:#FFFFFF;border:{b_border};border-radius:6px;padding:6px;margin-bottom:6px;box-shadow:0 1px 3px rgba(0,0,0,0.04);"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">{num_badge}</div>{chips_html}</div>'
+                        st.markdown(cell_html, unsafe_allow_html=True)
 
         st.markdown("---")
         # Gestor y editor de actividades del mes seleccionado
@@ -1455,12 +1445,8 @@ elif menu == "📅 7. Calendario de Actividades":
 
             with dias_cols[i]:
                 header_bg = "#991b1b" if es_dia_hoy else "#475569"
-                header_txt = "#FFFFFF"
-                st.markdown(f"""
-                <div style="background-color:{header_bg}; color:{header_txt}; padding:6px; border-radius:6px; text-align:center; font-size:0.85rem; font-weight:700; margin-bottom:8px;">
-                    {dias_encabezado[i]}<br><span style="font-size:1rem;">{d_fecha.day}</span>
-                </div>
-                """, unsafe_allow_html=True)
+                header_html = f'<div style="background-color:{header_bg};color:#FFFFFF;padding:6px;border-radius:6px;text-align:center;font-size:0.85rem;font-weight:700;margin-bottom:8px;">{dias_encabezado[i]}<br><span style="font-size:1rem;">{d_fecha.day}</span></div>'
+                st.markdown(header_html, unsafe_allow_html=True)
 
                 acts_del_dia = actividades_por_fecha.get(d_fecha_str, [])
                 if not acts_del_dia:
@@ -1469,12 +1455,8 @@ elif menu == "📅 7. Calendario de Actividades":
                     for a in acts_del_dia:
                         estilo = CAL_ESTILOS.get(a["tipo_actividad"], ESTILO_DEFAULT)
                         tachado = "line-through" if a["completada"] == 1 else "none"
-                        st.markdown(f"""
-                        <div style="background-color:{estilo['bg']}; border-left:4px solid {estilo['chip']}; color:{estilo['text']}; padding:6px; border-radius:4px; font-size:0.8rem; margin-bottom:6px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
-                            <b style="text-decoration:{tachado};">{a['titulo']}</b><br>
-                            <span style="font-size:0.75rem; color:{estilo['text']};">{estilo['badge']}</span>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        card_html = f'<div style="background-color:{estilo["bg"]};border-left:4px solid {estilo["chip"]};color:{estilo["text"]};padding:6px;border-radius:4px;font-size:0.8rem;margin-bottom:6px;box-shadow:0 1px 2px rgba(0,0,0,0.05);"><b style="text-decoration:{tachado};">{a["titulo"]}</b><br><span style="font-size:0.75rem;color:{estilo["text"]};">{estilo["badge"]}</span></div>'
+                        st.markdown(card_html, unsafe_allow_html=True)
 
     # 3. AGENDA / LISTA CRONOLÓGICA
     with tab_agenda:
