@@ -1199,30 +1199,44 @@ elif menu == "🛠️ 8. Mantenimiento de Equipos":
 
     st.markdown("### 📋 Plan de Mantenimiento Preventivo")
 
-    for t in tasks:
-        badge_cls = "badge-aldia" if t["estado"] == "AL DÍA" else ("badge-proximo" if t["estado"] == "PRÓXIMO" else "badge-vencido")
-        with st.container():
-            col_eq_info, col_eq_btn = st.columns([3.5, 1.5])
-            with col_eq_info:
-                st.markdown(f"#### ⚙️ {t['equipo']} - <span class='badge-tag {badge_cls}'>{t['estado']}</span>", unsafe_allow_html=True)
-                st.markdown(f"**Tarea:** {t['tarea']}")
-                st.markdown(f"📅 **Última fecha:** {t['ultima_fecha']} | **Próxima fecha programada:** **{t['proxima_fecha']}** (Frecuencia: cada {t['frecuencia_dias']} días)")
-                if t["dias_restantes"] < 0:
-                    st.markdown(f"<span style='color: #DC2626; font-weight: 700;'>⚠️ Vencido hace {abs(t['dias_restantes'])} día(s)</span>", unsafe_allow_html=True)
-                else:
-                    st.caption(f"Faltan {t['dias_restantes']} día(s) para el próximo servicio")
-                if t["notas"]:
-                    st.caption(f"Nota técnica: {t['notas']}")
+    if not tasks:
+        st.info("No hay equipos ni rutinas de mantenimiento registradas. Puedes agregar una a continuación.")
+    else:
+        for t in tasks:
+            badge_cls = "badge-aldia" if t["estado"] == "AL DÍA" else ("badge-proximo" if t["estado"] == "PRÓXIMO" else "badge-vencido")
+            with st.container():
+                col_eq_info, col_eq_btn = st.columns([3.5, 1.5])
+                with col_eq_info:
+                    st.markdown(f"#### ⚙️ {t['equipo']} - <span class='badge-tag {badge_cls}'>{t['estado']}</span>", unsafe_allow_html=True)
+                    st.markdown(f"**Tarea:** {t['tarea']}")
+                    st.markdown(f"📅 **Última fecha:** {t['ultima_fecha']} | **Próxima fecha programada:** **{t['proxima_fecha']}** (Frecuencia: cada {t['frecuencia_dias']} días)")
+                    if t["dias_restantes"] < 0:
+                        st.markdown(f"<span style='color: #DC2626; font-weight: 700;'>⚠️ Vencido hace {abs(t['dias_restantes'])} día(s)</span>", unsafe_allow_html=True)
+                    else:
+                        st.caption(f"Faltan {t['dias_restantes']} día(s) para el próximo servicio")
+                    if t["notas"]:
+                        st.caption(f"Nota técnica: {t['notas']}")
 
-            with col_eq_btn:
-                st.write("")
-                st.write("")
-                if st.button("✅ Marcar Realizado Hoy", key=f"btn_maint_{t['id']}", type="primary"):
-                    baker_math.complete_maintenance(t["id"])
-                    st.success(f"Mantenimiento registrado para {t['equipo']}. Próxima fecha calculada automáticamente.")
-                    st.rerun()
+                with col_eq_btn:
+                    st.write("")
+                    if st.button("✅ Marcar Realizado", key=f"btn_maint_{t['id']}", type="primary", use_container_width=True):
+                        baker_math.complete_maintenance(t["id"])
+                        st.success(f"Mantenimiento registrado para {t['equipo']}. Próxima fecha calculada automáticamente.")
+                        st.rerun()
 
-            st.divider()
+                    exp_del = st.expander("🗑️ Eliminar Equipo", expanded=False)
+                    with exp_del:
+                        st.caption(f"¿Deseas eliminar definitivamente este equipo del sistema?")
+                        if st.button("⚠️ Confirmar Borrado", key=f"btn_del_eq_{t['id']}", type="secondary", use_container_width=True):
+                            conn = get_connection()
+                            cur = conn.cursor()
+                            cur.execute("DELETE FROM mantenimiento_equipos WHERE id = ?", (t["id"],))
+                            conn.commit()
+                            conn.close()
+                            st.warning(f"Equipo '{t['equipo']}' eliminado.")
+                            st.rerun()
+
+                st.divider()
 
     with st.expander("➕ Agregar Nuevo Equipo o Rutina de Mantenimiento"):
         with st.form("form_nuevo_equipo"):
