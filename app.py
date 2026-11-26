@@ -19,6 +19,37 @@ st.set_page_config(
 # Inicializar Base de Datos con soporte COP y nuevas tablas
 init_db()
 
+# Funciones de limpieza de números para evitar ceros innecesarios (ej: '3003545,0000' -> '3003545')
+def clean_phone_or_code(val):
+    """Limpia números de teléfono, identificadores o códigos para que no muestren comas ni ceros decimales."""
+    if val is None or pd.isna(val):
+        return ""
+    s = str(val).strip()
+    if s.endswith(".0"):
+        s = s[:-2]
+    s = s.replace(",0000", "").replace(".0000", "").replace(",00", "").replace(".00", "")
+    return s
+
+def format_stock_qty(qty, unidad):
+    """
+    Formatea cantidades numéricas:
+    - Para pesos (g, kg, libra, lb, ml, l), permite decimales si los tiene (ej: 40.000 g o 1.5 kg).
+    - Para unidades u otros elementos no de peso, formatea como entero estricto sin comas ni ceros decimales.
+    """
+    if qty is None or pd.isna(qty):
+        return "0"
+    try:
+        f_val = float(qty)
+        u_lower = str(unidad).lower()
+        if any(w in u_lower for w in ["g", "kg", "gramo", "kilo", "libra", "lb", "ml", "l", "litro"]):
+            if f_val.is_integer():
+                return f"{int(f_val):,}".replace(",", ".")
+            return f"{f_val:,.1f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        else:
+            return str(int(round(f_val)))
+    except (ValueError, TypeError):
+        return str(qty)
+
 # Estilos CSS con Tailwind Red-800 (#991b1b) para Sidebar y diseño artesanal
 st.markdown("""
 <style>
@@ -266,14 +297,25 @@ if menu == "🥖 1. Calculadora & Recetas (Núcleo)":
             # Formatear costo en COP
             df_display["Costo (COP)"] = df_display["Costo (COP)"].apply(baker_math.format_cop)
             df_display["¿Hay Stock?"] = df_display["¿Hay Stock?"].apply(lambda x: "✅ Sí" if x else "❌ Insuficiente")
+            
+            # Formatear cantidades respetando si es peso o unidades enteras
+            df_display["Por Hogaza"] = df_display.apply(lambda r: format_stock_qty(r["Por Hogaza"], r["Unidad"]), axis=1)
+            df_display["Total para el Lote"] = df_display.apply(lambda r: format_stock_qty(r["Total para el Lote"], r["Unidad"]), axis=1)
+            df_display["Stock en Bodega"] = df_display.apply(lambda r: format_stock_qty(r["Stock en Bodega"], r["Unidad"]), axis=1)
+            df_display["% Panadero"] = df_display["% Panadero"].apply(lambda x: f"{x:g}%" if x > 0 else "-")
 
             st.dataframe(
-                df_display.style.format({
-                    "% Panadero": "{:.1f}%",
-                    "Por Hogaza": "{:.1f}",
-                    "Total para el Lote": "{:,.1f}",
-                    "Stock en Bodega": "{:,.0f}"
-                }),
+                df_display,
+                column_config={
+                    "Ingrediente": st.column_config.TextColumn("Ingrediente"),
+                    "% Panadero": st.column_config.TextColumn("% Panadero"),
+                    "Por Hogaza": st.column_config.TextColumn("Por Hogaza"),
+                    "Total para el Lote": st.column_config.TextColumn("Total para el Lote"),
+                    "Unidad": st.column_config.TextColumn("Unidad"),
+                    "Costo (COP)": st.column_config.TextColumn("Costo (COP)"),
+                    "Stock en Bodega": st.column_config.TextColumn("Stock en Bodega"),
+                    "¿Hay Stock?": st.column_config.TextColumn("¿Hay Stock?")
+                },
                 use_container_width=True
             )
 
@@ -363,10 +405,17 @@ elif menu == "💰 2. Costos & Fijación de Precios":
                 
                 df_ing_costos = pd.DataFrame(calc_unitario["ingredientes"])
                 df_ing_costos["costo_cop"] = df_ing_costos["costo_linea"].apply(baker_math.format_cop)
+                df_ing_costos["Cantidad Formateada"] = df_ing_costos.apply(lambda r: format_stock_qty(r["gramos_por_hogaza"], r["unidad"]), axis=1)
                 st.dataframe(
-                    df_ing_costos[["nombre", "gramos_por_hogaza", "unidad", "costo_cop"]].rename(
-                        columns={"nombre": "Insumo", "gramos_por_hogaza": "Cantidad", "unidad": "Unidad", "costo_cop": "Costo en COP"}
-                    ).style.format({"Cantidad": "{:.1f}"}),
+                    df_ing_costos[["nombre", "Cantidad Formateada", "unidad", "costo_cop"]].rename(
+                        columns={"nombre": "Insumo", "Cantidad Formateada": "Cantidad", "unidad": "Unidad", "costo_cop": "Costo en COP"}
+                    ),
+                    column_config={
+                        "Insumo": st.column_config.TextColumn("Insumo"),
+                        "Cantidad": st.column_config.TextColumn("Cantidad"),
+                        "Unidad": st.column_config.TextColumn("Unidad"),
+                        "Costo en COP": st.column_config.TextColumn("Costo en COP")
+                    },
                     use_container_width=True
                 )
                 
@@ -458,19 +507,29 @@ elif menu == "📦 3. Inventario & Materia Prima":
 
     df_stock["Estado"] = df_stock.apply(calcular_estado, axis=1)
     df_stock["Costo COP"] = df_stock["costo_unitario"].apply(baker_math.format_cop)
+    df_stock["id_limpio"] = df_stock["id"].apply(clean_phone_or_code)
+    df_stock["Stock Actual Formateado"] = df_stock.apply(lambda r: format_stock_qty(r["stock_actual"], r["unidad_medida"]), axis=1)
+    df_stock["Stock Mínimo Formateado"] = df_stock.apply(lambda r: format_stock_qty(r["stock_minimo"], r["unidad_medida"]), axis=1)
 
     st.markdown("### 📋 Existencias Actuales en Bodega")
     st.dataframe(
-        df_stock[["id", "nombre", "categoria", "stock_actual", "stock_minimo", "unidad_medida", "Costo COP", "Estado"]].rename(
+        df_stock[["id_limpio", "nombre", "categoria", "Stock Actual Formateado", "Stock Mínimo Formateado", "unidad_medida", "Costo COP", "Estado"]].rename(
             columns={
-                "id": "ID", "nombre": "Insumo", "categoria": "Categoría",
-                "stock_actual": "Stock Actual", "stock_minimo": "Stock Mínimo",
+                "id_limpio": "ID", "nombre": "Insumo", "categoria": "Categoría",
+                "Stock Actual Formateado": "Stock Actual", "Stock Mínimo Formateado": "Stock Mínimo",
                 "unidad_medida": "Unidad", "Costo COP": "Costo Unitario (COP)"
             }
-        ).style.format({
-            "Stock Actual": "{:,.1f}",
-            "Stock Mínimo": "{:,.1f}"
-        }),
+        ),
+        column_config={
+            "ID": st.column_config.TextColumn("ID"),
+            "Insumo": st.column_config.TextColumn("Insumo"),
+            "Categoría": st.column_config.TextColumn("Categoría"),
+            "Stock Actual": st.column_config.TextColumn("Stock Actual"),
+            "Stock Mínimo": st.column_config.TextColumn("Stock Mínimo"),
+            "Unidad": st.column_config.TextColumn("Unidad"),
+            "Costo Unitario (COP)": st.column_config.TextColumn("Costo Unitario (COP)"),
+            "Estado": st.column_config.TextColumn("Estado")
+        },
         use_container_width=True
     )
 
@@ -548,8 +607,18 @@ elif menu == "📦 3. Inventario & Materia Prima":
         st.markdown("---")
         st.markdown("#### 📜 Registro de Últimas Entradas de Insumos")
         df_ue = pd.DataFrame([dict(e) for e in ultimas_entradas])
+        df_ue["Cantidad Formateada"] = df_ue.apply(lambda r: "+" + format_stock_qty(r["cantidad"], r["unidad_medida"]), axis=1)
         st.dataframe(
-            df_ue.rename(columns={"fecha": "Fecha y Hora", "insumo": "Insumo", "cantidad": "Cantidad Ingresada", "unidad_medida": "Unidad", "referencia": "Referencia"}).style.format({"Cantidad Ingresada": "+{:,.1f}"}),
+            df_ue[["fecha", "insumo", "Cantidad Formateada", "unidad_medida", "referencia"]].rename(
+                columns={"fecha": "Fecha y Hora", "insumo": "Insumo", "Cantidad Formateada": "Cantidad Ingresada", "unidad_medida": "Unidad", "referencia": "Referencia"}
+            ),
+            column_config={
+                "Fecha y Hora": st.column_config.TextColumn("Fecha y Hora"),
+                "Insumo": st.column_config.TextColumn("Insumo"),
+                "Cantidad Ingresada": st.column_config.TextColumn("Cantidad Ingresada"),
+                "Unidad": st.column_config.TextColumn("Unidad"),
+                "Referencia": st.column_config.TextColumn("Referencia")
+            },
             use_container_width=True
         )
 
@@ -583,8 +652,8 @@ elif menu == "📋 4. Pedidos & Preventa (Lotes)":
             for lote in lotes:
                 with st.expander(f"🍞 Lote {lote['codigo_lote']} - {lote['receta_nombre']} ({lote['fecha_horneado']}) - Estado: {lote['estado']}"):
                     c1, c2, c3, c4 = st.columns(4)
-                    c1.write(f"**Programado:** {lote['unidades_programadas']} hogazas ({lote['peso_hogaza_g']:g}g)")
-                    c2.write(f"**Reservado en preventa:** {lote['unidades_reservadas']} hogazas")
+                    c1.write(f"**Programado:** {int(lote['unidades_programadas'])} hogazas ({lote['peso_hogaza_g']:g}g)")
+                    c2.write(f"**Reservado en preventa:** {int(lote['unidades_reservadas'])} hogazas")
                     c3.write(f"**Costo Estimado Lote:** {baker_math.format_cop(lote['costo_total_lote'])}")
                     c4.write(f"**Inventario:** {'✅ Descontado' if lote['inventario_descontado'] == 1 else '❌ Pendiente'}")
 
@@ -648,8 +717,9 @@ elif menu == "📋 4. Pedidos & Preventa (Lotes)":
                 with st.container():
                     col_info, col_est, col_acc = st.columns([3, 1.5, 1.5])
                     with col_info:
-                        st.markdown(f"**Pedido #{p['id']} - {p['cliente_nombre']}** <span class='badge-tag {badge_tipo}'>{p['tipo_cliente']}</span>", unsafe_allow_html=True)
-                        st.markdown(f"🥖 **{p['unidades']}x {p['pan_nombre']}** | 📅 Entrega: **{p['fecha_entrega']}** | Lote: `{p['codigo_lote'] or 'Sin asignar'}`")
+                        tel_display = f" ({clean_phone_or_code(p['cliente_telefono'])})" if p['cliente_telefono'] else ""
+                        st.markdown(f"**Pedido #{clean_phone_or_code(p['id'])} - {p['cliente_nombre']}**{tel_display} <span class='badge-tag {badge_tipo}'>{p['tipo_cliente']}</span>", unsafe_allow_html=True)
+                        st.markdown(f"🥖 **{int(p['unidades'])}x {p['pan_nombre']}** | 📅 Entrega: **{p['fecha_entrega']}** | Lote: `{p['codigo_lote'] or 'Sin asignar'}`")
                         nota_str = f" | Nota: {p['notas']}" if p["notas"] else ""
                         st.markdown(f"💰 Total: **{baker_math.format_cop(p['total_cobrado'])}** ({p['metodo_pago']}){nota_str}")
                     
@@ -775,9 +845,19 @@ elif menu == "📋 4. Pedidos & Preventa (Lotes)":
             st.markdown("#### Clientes Particulares (Hogares y Consumo Individual)")
             if clientes_min:
                 df_min = pd.DataFrame(clientes_min)
-                st.dataframe(df_min[["nombre", "telefono", "direccion", "preferencias"]].rename(
-                    columns={"nombre": "Nombre", "telefono": "Teléfono / WhatsApp", "direccion": "Dirección", "preferencias": "Preferencias de Pan"}
-                ), use_container_width=True)
+                df_min["telefono_limpio"] = df_min["telefono"].apply(clean_phone_or_code)
+                st.dataframe(
+                    df_min[["nombre", "telefono_limpio", "direccion", "preferencias"]].rename(
+                        columns={"nombre": "Nombre", "telefono_limpio": "Teléfono / WhatsApp", "direccion": "Dirección", "preferencias": "Preferencias de Pan"}
+                    ),
+                    column_config={
+                        "Nombre": st.column_config.TextColumn("Nombre"),
+                        "Teléfono / WhatsApp": st.column_config.TextColumn("Teléfono / WhatsApp"),
+                        "Dirección": st.column_config.TextColumn("Dirección"),
+                        "Preferencias de Pan": st.column_config.TextColumn("Preferencias de Pan")
+                    },
+                    use_container_width=True
+                )
             else:
                 st.info("No hay clientes minoristas registrados.")
 
@@ -785,9 +865,19 @@ elif menu == "📋 4. Pedidos & Preventa (Lotes)":
             st.markdown("#### Clientes al Por Mayor (Cafeterías, Bistrós, Restaurantes, Hoteles)")
             if clientes_may:
                 df_may = pd.DataFrame(clientes_may)
-                st.dataframe(df_may[["nombre", "telefono", "direccion", "preferencias"]].rename(
-                    columns={"nombre": "Razón Social / Nombre", "telefono": "Contacto / WhatsApp", "direccion": "Dirección de Entrega", "preferencias": "Condiciones / Preferencias Comerciales"}
-                ), use_container_width=True)
+                df_may["telefono_limpio"] = df_may["telefono"].apply(clean_phone_or_code)
+                st.dataframe(
+                    df_may[["nombre", "telefono_limpio", "direccion", "preferencias"]].rename(
+                        columns={"nombre": "Razón Social / Nombre", "telefono_limpio": "Contacto / WhatsApp", "direccion": "Dirección de Entrega", "preferencias": "Condiciones / Preferencias Comerciales"}
+                    ),
+                    column_config={
+                        "Razón Social / Nombre": st.column_config.TextColumn("Razón Social / Nombre"),
+                        "Contacto / WhatsApp": st.column_config.TextColumn("Contacto / WhatsApp"),
+                        "Dirección de Entrega": st.column_config.TextColumn("Dirección de Entrega"),
+                        "Condiciones / Preferencias Comerciales": st.column_config.TextColumn("Condiciones / Preferencias Comerciales")
+                    },
+                    use_container_width=True
+                )
             else:
                 st.info("No hay clientes mayoristas registrados.")
 
@@ -926,6 +1016,16 @@ elif menu == "🌡️ 5. Bitácora de Fermentación & Calidad":
                         "evaluacion_calidad": "Estrellas (1-5)", "observaciones_calidad": "Observaciones"
                     }
                 ),
+                column_config={
+                    "Lote": st.column_config.TextColumn("Lote"),
+                    "Pan": st.column_config.TextColumn("Pan"),
+                    "T. Amb": st.column_config.TextColumn("T. Amb"),
+                    "T. Masa": st.column_config.TextColumn("T. Masa"),
+                    "Bloque": st.column_config.TextColumn("Bloque"),
+                    "Frío": st.column_config.TextColumn("Frío"),
+                    "Estrellas (1-5)": st.column_config.TextColumn("Estrellas (1-5)"),
+                    "Observaciones": st.column_config.TextColumn("Observaciones")
+                },
                 use_container_width=True
             )
 
@@ -1057,6 +1157,12 @@ elif menu == "📊 6. Finanzas & Reportes":
                 df_g[["fecha", "concepto", "categoria", "Monto Formateado"]].rename(
                     columns={"fecha": "Fecha", "concepto": "Concepto", "categoria": "Categoría", "Monto Formateado": "Monto en COP"}
                 ),
+                column_config={
+                    "Fecha": st.column_config.TextColumn("Fecha"),
+                    "Concepto": st.column_config.TextColumn("Concepto"),
+                    "Categoría": st.column_config.TextColumn("Categoría"),
+                    "Monto en COP": st.column_config.TextColumn("Monto en COP")
+                },
                 use_container_width=True
             )
         else:
