@@ -1224,17 +1224,49 @@ elif menu == "🛠️ 8. Mantenimiento de Equipos":
                         st.success(f"Mantenimiento registrado para {t['equipo']}. Próxima fecha calculada automáticamente.")
                         st.rerun()
 
-                    exp_del = st.expander("🗑️ Eliminar Equipo", expanded=False)
-                    with exp_del:
-                        st.caption(f"¿Deseas eliminar definitivamente este equipo del sistema?")
-                        if st.button("⚠️ Confirmar Borrado", key=f"btn_del_eq_{t['id']}", type="secondary", use_container_width=True):
-                            conn = get_connection()
-                            cur = conn.cursor()
-                            cur.execute("DELETE FROM mantenimiento_equipos WHERE id = ?", (t["id"],))
-                            conn.commit()
-                            conn.close()
-                            st.warning(f"Equipo '{t['equipo']}' eliminado.")
-                            st.rerun()
+                    exp_mod = st.expander("⚙️ Modificar Equipo", expanded=False)
+                    with exp_mod:
+                        tab_ed_eq, tab_del_eq = st.tabs(["✏️ Editar", "🗑️ Eliminar"])
+                        
+                        with tab_ed_eq:
+                            with st.form(f"form_edit_eq_{t['id']}"):
+                                ed_eq_nombre = st.text_input("Nombre del Equipo:", value=t["equipo"])
+                                ed_eq_tarea = st.text_input("Tarea de Mantenimiento:", value=t["tarea"])
+                                col_ed1, col_ed2 = st.columns(2)
+                                with col_ed1:
+                                    ed_eq_frec = st.number_input("Frecuencia (días):", min_value=1, max_value=365, value=int(t["frecuencia_dias"]), step=5)
+                                with col_ed2:
+                                    ult_d = datetime.strptime(t["ultima_fecha"], "%Y-%m-%d").date()
+                                    ed_eq_ultima = st.date_input("Último Servicio:", value=ult_d, key=f"d_ult_{t['id']}")
+                                
+                                prox_d = datetime.strptime(t["proxima_fecha"], "%Y-%m-%d").date()
+                                ed_eq_proxima = st.date_input("Próximo Servicio:", value=prox_d, key=f"d_prox_{t['id']}")
+                                ed_eq_resp = st.text_input("Responsable:", value=t["responsable"] or "Panadero Jefe")
+                                ed_eq_notas = st.text_area("Notas Técnicas:", value=t["notas"] or "")
+                                
+                                if st.form_submit_button("💾 Guardar Cambios"):
+                                    conn = get_connection()
+                                    cur = conn.cursor()
+                                    cur.execute("""
+                                    UPDATE mantenimiento_equipos
+                                    SET equipo = ?, tarea = ?, frecuencia_dias = ?, ultima_fecha = ?, proxima_fecha = ?, responsable = ?, notas = ?
+                                    WHERE id = ?
+                                    """, (ed_eq_nombre, ed_eq_tarea, ed_eq_frec, ed_eq_ultima.strftime("%Y-%m-%d"), ed_eq_proxima.strftime("%Y-%m-%d"), ed_eq_resp, ed_eq_notas, t["id"]))
+                                    conn.commit()
+                                    conn.close()
+                                    st.success(f"Equipo '{ed_eq_nombre}' actualizado.")
+                                    st.rerun()
+
+                        with tab_del_eq:
+                            st.caption(f"¿Deseas eliminar definitivamente '{t['equipo']}' del sistema?")
+                            if st.button("⚠️ Confirmar Borrado", key=f"btn_del_eq_{t['id']}", type="secondary", use_container_width=True):
+                                conn = get_connection()
+                                cur = conn.cursor()
+                                cur.execute("DELETE FROM mantenimiento_equipos WHERE id = ?", (t["id"],))
+                                conn.commit()
+                                conn.close()
+                                st.warning(f"Equipo '{t['equipo']}' eliminado.")
+                                st.rerun()
 
                 st.divider()
 
