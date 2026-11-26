@@ -1,4 +1,15 @@
+from datetime import datetime, date, timedelta
 from database import get_connection
+
+def format_cop(valor):
+    """Formatea un número a Pesos Colombianos, ej: $ 25.000 COP"""
+    if valor is None:
+        return "$ 0 COP"
+    try:
+        val_int = int(round(float(valor)))
+        return f"$ {val_int:,}".replace(",", ".") + " COP"
+    except (ValueError, TypeError):
+        return f"$ {valor} COP"
 
 def get_recipe_details(receta_id):
     conn = get_connection()
@@ -20,7 +31,7 @@ def get_recipe_details(receta_id):
 def calculate_production_batch(receta_id, unidades, peso_por_hogaza_g):
     """
     Calcula los gramos exactos de cada ingrediente para N hogazas usando Porcentaje de Panadero.
-    También computa el costo exacto de producción por lote y por hogaza.
+    También computa el costo exacto de producción por lote y por hogaza en COP.
     """
     rows = get_recipe_details(receta_id)
     if not rows:
@@ -42,7 +53,6 @@ def calculate_production_batch(receta_id, unidades, peso_por_hogaza_g):
         harina_base_porcentaje_total = 100.0
 
     # 2. Harina total base en gramos requerida
-    # Masa total = HarinaBase * (Suma_Porcentajes / 100)
     harina_base_total_g = (total_masa_requerida_g / (suma_porcentajes_masa / 100.0))
 
     ingredientes_calculados = []
@@ -71,7 +81,7 @@ def calculate_production_batch(receta_id, unidades, peso_por_hogaza_g):
                 "porcentaje": r["porcentaje_panadero"],
                 "gramos_por_hogaza": round(gramos_totales / unidades, 1),
                 "gramos_lote": round(gramos_totales, 1),
-                "costo_linea": round(costo_linea, 3),
+                "costo_linea": round(costo_linea, 0),
                 "stock_actual": r["stock_actual"],
                 "stock_suficiente": r["stock_actual"] >= gramos_totales
             })
@@ -90,7 +100,7 @@ def calculate_production_batch(receta_id, unidades, peso_por_hogaza_g):
                 "porcentaje": 0.0,
                 "gramos_por_hogaza": r["cantidad_fija_por_unidad"],
                 "gramos_lote": cant_total,
-                "costo_linea": round(costo_linea, 3),
+                "costo_linea": round(costo_linea, 0),
                 "stock_actual": r["stock_actual"],
                 "stock_suficiente": r["stock_actual"] >= cant_total
             })
@@ -104,29 +114,24 @@ def calculate_production_batch(receta_id, unidades, peso_por_hogaza_g):
         "total_masa_requerida_g": round(total_masa_requerida_g, 1),
         "harina_base_total_g": round(harina_base_total_g, 1),
         "hidratacion_porcentaje": round(hidratacion_calculada, 1),
-        "costo_total_lote": round(costo_total_lote, 2),
-        "costo_por_hogaza": round(costo_por_hogaza, 2),
+        "costo_total_lote": round(costo_total_lote, 0),
+        "costo_por_hogaza": round(costo_por_hogaza, 0),
         "ingredientes": ingredientes_calculados
     }
 
 def calculate_pricing(costo_unitario, tipo_margen, valor_margen):
     """
-    Calcula el precio de venta sugerido y la ganancia por unidad.
-    - tipo_margen: 'porcentual_margen' (margen sobre precio de venta),
-                   'porcentual_markup' (margen sobre el costo),
-                   'monto_fijo' (ganancia fija deseada por pan)
+    Calcula el precio de venta sugerido y la ganancia por unidad en COP.
     """
     if costo_unitario <= 0:
         return {"precio_venta": 0.0, "ganancia": 0.0, "margen_real_pct": 0.0}
 
     if tipo_margen == "porcentual_margen":
-        # Margen sobre venta: P = Costo / (1 - Margen%)
         margen_frac = valor_margen / 100.0
         if margen_frac >= 1.0:
             margen_frac = 0.99
         precio = costo_unitario / (1.0 - margen_frac)
     elif tipo_margen == "porcentual_markup":
-        # Markup sobre costo: P = Costo * (1 + Markup%)
         precio = costo_unitario * (1.0 + (valor_margen / 100.0))
     else: # monto_fijo
         precio = costo_unitario + valor_margen
@@ -135,8 +140,8 @@ def calculate_pricing(costo_unitario, tipo_margen, valor_margen):
     margen_real_pct = (ganancia / precio * 100.0) if precio > 0 else 0.0
 
     return {
-        "precio_venta": round(precio, 2),
-        "ganancia_por_unidad": round(ganancia, 2),
+        "precio_venta": round(precio, -2), # Redondear a centenas de COP
+        "ganancia_por_unidad": round(ganancia, -2),
         "margen_real_pct": round(margen_real_pct, 1)
     }
 
@@ -165,20 +170,17 @@ def discount_inventory_for_batch(lote_id):
 
     for item in calc["ingredientes"]:
         cantidad_usada = item["gramos_lote"]
-        # Descontar de stock
         cursor.execute("""
             UPDATE ingredientes 
             SET stock_actual = stock_actual - ?
             WHERE id = ?
         """, (cantidad_usada, item["ingrediente_id"]))
 
-        # Registrar movimiento
         cursor.execute("""
             INSERT INTO movimientos_inventario (ingrediente_id, tipo_movimiento, cantidad, referencia)
             VALUES (?, 'SALIDA_PRODUCCION', ?, ?)
         """, (item["ingrediente_id"], cantidad_usada, f"Lote #{lote['codigo_lote']} ({lote['unidades_programadas']} unidades)"))
 
-    # Marcar lote con inventario descontado y costo actualizado
     cursor.execute("""
         UPDATE lotes_produccion
         SET inventario_descontado = 1, costo_total_lote = ?
@@ -203,3 +205,62 @@ def get_low_stock_alerts():
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+def get_maintenance_tasks():
+    """
+    Retorna la lista de mantenimientos actualizando automáticamente el estado según la fecha.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM mantenimiento_equipos ORDER BY proxima_fecha ASC")
+    tasks = cursor.fetchall()
+    
+    hoy = date.today()
+    updated_tasks = []
+    
+    for t in tasks:
+        prox = datetime.strptime(t["proxima_fecha"], "%Y-%m-%d").date()
+        dias_restantes = (prox - hoy).days
+        
+        nuevo_estado = "AL DÍA"
+        if dias_restantes < 0:
+            nuevo_estado = "VENCIDO"
+        elif dias_restantes <= 7:
+            nuevo_estado = "PRÓXIMO"
+            
+        if nuevo_estado != t["estado"]:
+            cursor.execute("UPDATE mantenimiento_equipos SET estado = ? WHERE id = ?", (nuevo_estado, t["id"]))
+            
+        t_dict = dict(t)
+        t_dict["estado"] = nuevo_estado
+        t_dict["dias_restantes"] = dias_restantes
+        updated_tasks.append(t_dict)
+        
+    conn.commit()
+    conn.close()
+    return updated_tasks
+
+def complete_maintenance(task_id):
+    """
+    Marca un mantenimiento como realizado hoy y calcula la siguiente fecha según su frecuencia.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM mantenimiento_equipos WHERE id = ?", (task_id,))
+    t = cursor.fetchone()
+    if not t:
+        conn.close()
+        return False
+        
+    hoy = date.today()
+    prox = hoy + timedelta(days=t["frecuencia_dias"])
+    
+    cursor.execute("""
+    UPDATE mantenimiento_equipos 
+    SET ultima_fecha = ?, proxima_fecha = ?, estado = 'AL DÍA'
+    WHERE id = ?
+    """, (hoy.strftime("%Y-%m-%d"), prox.strftime("%Y-%m-%d"), task_id))
+    
+    conn.commit()
+    conn.close()
+    return True

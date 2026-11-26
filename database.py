@@ -1,6 +1,6 @@
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "palveti.db")
 
@@ -18,11 +18,11 @@ def init_db():
     CREATE TABLE IF NOT EXISTS ingredientes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT NOT NULL,
-        categoria TEXT NOT NULL, -- harina, liquido, fermento, aditivo, empaque
-        unidad_medida TEXT NOT NULL, -- g, kg, unidad, ml
+        categoria TEXT NOT NULL,
+        unidad_medida TEXT NOT NULL,
         stock_actual REAL NOT NULL DEFAULT 0,
         stock_minimo REAL NOT NULL DEFAULT 0,
-        costo_unitario REAL NOT NULL DEFAULT 0 -- costo por gramo o por unidad
+        costo_unitario REAL NOT NULL DEFAULT 0 -- Costo en COP por gramo o por unidad
     )
     """)
 
@@ -31,7 +31,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS movimientos_inventario (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ingrediente_id INTEGER NOT NULL,
-        tipo_movimiento TEXT NOT NULL, -- ENTRADA_COMPRA, SALIDA_PRODUCCION, AJUSTE_MERMA
+        tipo_movimiento TEXT NOT NULL,
         cantidad REAL NOT NULL,
         referencia TEXT,
         fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -45,9 +45,9 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT NOT NULL,
         descripcion TEXT,
-        peso_unitario_crudo REAL NOT NULL DEFAULT 850, -- gramos
-        peso_unitario_horneado REAL NOT NULL DEFAULT 750, -- gramos
-        precio_venta_sugerido REAL NOT NULL DEFAULT 0,
+        peso_unitario_crudo REAL NOT NULL DEFAULT 850,
+        peso_unitario_horneado REAL NOT NULL DEFAULT 750,
+        precio_venta_sugerido REAL NOT NULL DEFAULT 0, -- en COP
         tiempo_horneado_minutos INTEGER DEFAULT 35,
         temperatura_horno_c INTEGER DEFAULT 230
     )
@@ -59,9 +59,9 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         receta_id INTEGER NOT NULL,
         ingrediente_id INTEGER NOT NULL,
-        es_harina_base INTEGER NOT NULL DEFAULT 0, -- 1 si forma parte del 100% de harina
-        porcentaje_panadero REAL NOT NULL, -- % respecto a harina base total
-        cantidad_fija_por_unidad REAL DEFAULT 0, -- para empaques u otros por hogaza
+        es_harina_base INTEGER NOT NULL DEFAULT 0,
+        porcentaje_panadero REAL NOT NULL,
+        cantidad_fija_por_unidad REAL DEFAULT 0,
         FOREIGN KEY (receta_id) REFERENCES recetas(id),
         FOREIGN KEY (ingrediente_id) REFERENCES ingredientes(id)
     )
@@ -78,7 +78,7 @@ def init_db():
         unidades_reales INTEGER DEFAULT 0,
         fecha_amasado DATE NOT NULL,
         fecha_horneado DATE NOT NULL,
-        estado TEXT NOT NULL DEFAULT 'PLANIFICADO', -- PLANIFICADO, EN_FERMENTACION, HORNEADO, FINALIZADO
+        estado TEXT NOT NULL DEFAULT 'PLANIFICADO',
         inventario_descontado INTEGER NOT NULL DEFAULT 0,
         costo_total_lote REAL DEFAULT 0,
         FOREIGN KEY (receta_id) REFERENCES recetas(id)
@@ -97,20 +97,21 @@ def init_db():
         pliegues_realizados INTEGER DEFAULT 3,
         tiempo_retardo_frio_horas REAL,
         temp_nevera_c REAL DEFAULT 4.0,
-        evaluacion_calidad INTEGER DEFAULT 5, -- 1 a 5 estrellas
+        evaluacion_calidad INTEGER DEFAULT 5,
         observaciones_calidad TEXT,
         FOREIGN KEY (lote_id) REFERENCES lotes_produccion(id)
     )
     """)
 
-    # 7. Clientes
+    # 7. Clientes (con tipo_cliente: Minorista / Mayorista)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS clientes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT NOT NULL,
         telefono TEXT,
         direccion TEXT,
-        preferencias TEXT
+        preferencias TEXT,
+        tipo_cliente TEXT NOT NULL DEFAULT 'Minorista'
     )
     """)
 
@@ -124,8 +125,8 @@ def init_db():
         unidades INTEGER NOT NULL DEFAULT 1,
         fecha_pedido DATETIME DEFAULT CURRENT_TIMESTAMP,
         fecha_entrega DATE NOT NULL,
-        estado TEXT NOT NULL DEFAULT 'REGISTRADO', -- REGISTRADO, PAGADO, EN_FERMENTACION, HORNEADO, ENTREGADO
-        total_cobrado REAL NOT NULL,
+        estado TEXT NOT NULL DEFAULT 'REGISTRADO',
+        total_cobrado REAL NOT NULL, -- en COP
         metodo_pago TEXT DEFAULT 'Efectivo',
         notas TEXT,
         FOREIGN KEY (cliente_id) REFERENCES clientes(id),
@@ -139,124 +140,240 @@ def init_db():
     CREATE TABLE IF NOT EXISTS gastos_operativos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         concepto TEXT NOT NULL,
-        categoria TEXT NOT NULL, -- Energia/Gas, Alquiler, Empaque, Transporte, Otros
-        monto REAL NOT NULL,
+        categoria TEXT NOT NULL,
+        monto REAL NOT NULL, -- en COP
         fecha DATE NOT NULL
     )
     """)
 
+    # 10. Mantenimiento de Equipos
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS mantenimiento_equipos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        equipo TEXT NOT NULL,
+        tarea TEXT NOT NULL,
+        frecuencia_dias INTEGER NOT NULL DEFAULT 30,
+        ultima_fecha DATE NOT NULL,
+        proxima_fecha DATE NOT NULL,
+        estado TEXT NOT NULL DEFAULT 'AL DÍA', -- AL DÍA, PRÓXIMO, VENCIDO
+        responsable TEXT DEFAULT 'Panadero Jefe',
+        notas TEXT
+    )
+    """)
+
+    # 11. Calendario de Actividades Operativas
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS calendario_actividades (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha DATE NOT NULL,
+        tipo_actividad TEXT NOT NULL, -- Compra de Insumos, Apertura Preventa, Cierre Pedidos, Amasado, Horneado, Mantenimiento, Entrega
+        titulo TEXT NOT NULL,
+        descripcion TEXT,
+        completada INTEGER NOT NULL DEFAULT 0
+    )
+    """)
+
     conn.commit()
+
+    # Migrar base de datos si ya existe para asegurar compatibilidad y COP
+    migrate_to_cop(conn)
     seed_initial_data(conn)
     conn.close()
+
+def migrate_to_cop(conn):
+    """
+    Asegura que la columna tipo_cliente exista y convierte precios antiguos a COP.
+    """
+    cursor = conn.cursor()
+
+    # Verificar si existe columna tipo_cliente en clientes
+    cursor.execute("PRAGMA table_info(clientes)")
+    columnas_clientes = [col[1] for col in cursor.fetchall()]
+    if "tipo_cliente" not in columnas_clientes:
+        cursor.execute("ALTER TABLE clientes ADD COLUMN tipo_cliente TEXT NOT NULL DEFAULT 'Minorista'")
+
+    # Verificar si los precios de insumos están en dólares (< 100) y migrarlos a COP
+    cursor.execute("SELECT MAX(costo_unitario) FROM ingredientes")
+    row = cursor.fetchone()
+    max_costo = row[0] if row and row[0] is not None else 0
+
+    if max_costo > 0 and max_costo < 50:
+        # Migrar Insumos a COP realistas
+        costos_cop = {
+            "Harina de Fuerza 13% Proteína": 4.5, # $4.500 / kg -> $4.5 por gramo
+            "Harina Integral de Centeno": 7.2,    # $7.200 / kg -> $7.2 por gramo
+            "Agua Filtrada": 0.05,
+            "Masa Madre Activa 100% Hidratación": 5.0, # $5.000 / kg -> $5.0 por gramo
+            "Sal Marina Fina": 2.5,               # $2.500 / kg -> $2.5 por gramo
+            "Semillas Mixtas (Sésamo, Chía, Girasol)": 22.0, # $22.000 / kg -> $22.0 por gramo
+            "Aceite de Oliva Extra Virgen": 45.0, # $45.000 / litro -> $45.0 por gramo
+            "Bolsa de Papel Kraft PALVETI": 1200.0 # $1.200 por unidad
+        }
+        for nombre, costo in costos_cop.items():
+            cursor.execute("UPDATE ingredientes SET costo_unitario = ? WHERE nombre = ?", (costo, nombre))
+
+        # Migrar Recetas a precios COP
+        cursor.execute("UPDATE recetas SET precio_venta_sugerido = 22000 WHERE id = 1")
+        cursor.execute("UPDATE recetas SET precio_venta_sugerido = 26000 WHERE id = 2")
+        cursor.execute("UPDATE recetas SET precio_venta_sugerido = 28000 WHERE id = 3")
+
+        # Migrar Pedidos existentes a COP
+        cursor.execute("UPDATE pedidos SET total_cobrado = total_cobrado * 4000 WHERE total_cobrado < 500")
+
+        # Migrar Gastos existentes a COP
+        cursor.execute("UPDATE gastos_operativos SET monto = monto * 3000 WHERE monto < 500")
+
+        # Migrar Lotes a COP
+        cursor.execute("UPDATE lotes_produccion SET costo_total_lote = costo_total_lote * 4000 WHERE costo_total_lote < 500")
+
+        # Actualizar clientes existentes
+        cursor.execute("UPDATE clientes SET tipo_cliente = 'Mayorista' WHERE nombre LIKE '%Bistro%' OR nombre LIKE '%Café%'")
+
+    conn.commit()
 
 def seed_initial_data(conn):
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM ingredientes")
-    if cursor.fetchone()[0] > 0:
-        return # Ya contiene datos iniciales
+    if cursor.fetchone()[0] == 0:
+        # Insumos en Pesos Colombianos (COP)
+        # Gramos: costo_unitario = precio por gramo
+        # Unidades: costo_unitario = precio por unidad
+        ingredientes = [
+            ("Harina de Fuerza 13% Proteína", "harina", "g", 50000, 15000, 4.5), # $4.500 COP/kg
+            ("Harina Integral de Centeno", "harina", "g", 20000, 5000, 7.2),    # $7.200 COP/kg
+            ("Agua Filtrada", "liquido", "g", 100000, 10000, 0.05),             # $50 COP/litro
+            ("Masa Madre Activa 100% Hidratación", "fermento", "g", 12000, 3000, 5.0), # $5.000 COP/kg
+            ("Sal Marina Fina", "aditivo", "g", 10000, 2000, 2.5),              # $2.500 COP/kg
+            ("Semillas Mixtas (Sésamo, Chía, Girasol)", "aditivo", "g", 6000, 2000, 22.0), # $22.000 COP/kg
+            ("Aceite de Oliva Extra Virgen", "liquido", "g", 4000, 1000, 45.0), # $45.000 COP/litro
+            ("Bolsa de Papel Kraft PALVETI", "empaque", "unidad", 150, 40, 1200.0) # $1.200 COP c/u
+        ]
+        cursor.executemany("""
+        INSERT INTO ingredientes (nombre, categoria, unidad_medida, stock_actual, stock_minimo, costo_unitario)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, ingredientes)
 
-    # Insertar Insumos con costos aproximados (costo_unitario por gramo o por unidad)
-    ingredientes = [
-        ("Harina de Fuerza 13% Proteína", "harina", "g", 40000, 15000, 0.0013), # $1.30/kg
-        ("Harina Integral de Centeno", "harina", "g", 15000, 5000, 0.0019),    # $1.90/kg
-        ("Agua Filtrada", "liquido", "g", 100000, 10000, 0.0001),              # Casi despreciable
-        ("Masa Madre Activa 100% Hidratación", "fermento", "g", 10000, 3000, 0.0015), # $1.50/kg
-        ("Sal Marina Fina", "aditivo", "g", 8000, 2000, 0.0009),               # $0.90/kg
-        ("Semillas Mixtas (Sésamo, Chía, Girasol)", "aditivo", "g", 4500, 2000, 0.0055), # $5.50/kg
-        ("Aceite de Oliva Extra Virgen", "liquido", "g", 3000, 1000, 0.0090),  # $9.00/kg
-        ("Bolsa de Papel Kraft PALVETI", "empaque", "unidad", 120, 40, 0.28)   # $0.28 c/u
-    ]
-    cursor.executemany("""
-    INSERT INTO ingredientes (nombre, categoria, unidad_medida, stock_actual, stock_minimo, costo_unitario)
-    VALUES (?, ?, ?, ?, ?, ?)
-    """, ingredientes)
+        # Recetas estándar en COP
+        cursor.execute("""
+        INSERT INTO recetas (nombre, descripcion, peso_unitario_crudo, peso_unitario_horneado, precio_venta_sugerido, tiempo_horneado_minutos, temperatura_horno_c)
+        VALUES 
+        ('Hogaza Campesina Clásica', 'Pan de masa madre tradicional con 75% de hidratación y corteza crujiente.', 850, 750, 22000, 38, 230),
+        ('Hogaza Multicereales & Centeno', 'Hogaza rústica con 20% centeno integral y mezcla de semillas tostadas.', 900, 800, 26000, 40, 225),
+        ('Focaccia Artesanal al Romero', 'Focaccia esponjosa de alta hidratación con aceite de oliva extra virgen y romero.', 950, 880, 28000, 28, 220)
+        """)
 
-    # Insertar Recetas
-    cursor.execute("""
-    INSERT INTO recetas (nombre, descripcion, peso_unitario_crudo, peso_unitario_horneado, precio_venta_sugerido, tiempo_horneado_minutos, temperatura_horno_c)
-    VALUES 
-    ('Hogaza Campesina Clásica', 'Pan de masa madre tradicional con 75% de hidratación y corteza crujiente.', 850, 750, 5.50, 38, 230),
-    ('Hogaza Multicereales & Centeno', 'Hogaza rústica con 20% centeno integral y mezcla de semillas tostadas.', 900, 800, 6.50, 40, 225),
-    ('Focaccia Artesanal al Romero', 'Focaccia esponjosa de alta hidratación con aceite de oliva extra virgen y romero.', 950, 880, 7.00, 28, 220)
-    """)
+        cursor.execute("SELECT id, nombre FROM ingredientes")
+        ing_map = {row["nombre"]: row["id"] for row in cursor.fetchall()}
 
-    # Obtener IDs de ingredientes
-    cursor.execute("SELECT id, nombre FROM ingredientes")
-    ing_map = {row["nombre"]: row["id"] for row in cursor.fetchall()}
+        # Receta 1
+        cursor.executemany("""
+        INSERT INTO receta_ingredientes (receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad)
+        VALUES (?, ?, ?, ?, ?)
+        """, [
+            (1, ing_map["Harina de Fuerza 13% Proteína"], 1, 100.0, 0),
+            (1, ing_map["Agua Filtrada"], 0, 75.0, 0),
+            (1, ing_map["Masa Madre Activa 100% Hidratación"], 0, 20.0, 0),
+            (1, ing_map["Sal Marina Fina"], 0, 2.0, 0),
+            (1, ing_map["Bolsa de Papel Kraft PALVETI"], 0, 0, 1.0)
+        ])
 
-    # Receta 1: Hogaza Campesina Clásica (Total Harina = 100%, Agua=75%, MM=20%, Sal=2%)
-    receta1_id = 1
-    cursor.executemany("""
-    INSERT INTO receta_ingredientes (receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad)
-    VALUES (?, ?, ?, ?, ?)
-    """, [
-        (receta1_id, ing_map["Harina de Fuerza 13% Proteína"], 1, 100.0, 0),
-        (receta1_id, ing_map["Agua Filtrada"], 0, 75.0, 0),
-        (receta1_id, ing_map["Masa Madre Activa 100% Hidratación"], 0, 20.0, 0),
-        (receta1_id, ing_map["Sal Marina Fina"], 0, 2.0, 0),
-        (receta1_id, ing_map["Bolsa de Papel Kraft PALVETI"], 0, 0, 1.0)
-    ])
+        # Receta 2
+        cursor.executemany("""
+        INSERT INTO receta_ingredientes (receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad)
+        VALUES (?, ?, ?, ?, ?)
+        """, [
+            (2, ing_map["Harina de Fuerza 13% Proteína"], 1, 80.0, 0),
+            (2, ing_map["Harina Integral de Centeno"], 1, 20.0, 0),
+            (2, ing_map["Agua Filtrada"], 0, 78.0, 0),
+            (2, ing_map["Masa Madre Activa 100% Hidratación"], 0, 20.0, 0),
+            (2, ing_map["Sal Marina Fina"], 0, 2.1, 0),
+            (2, ing_map["Semillas Mixtas (Sésamo, Chía, Girasol)"], 0, 15.0, 0),
+            (2, ing_map["Bolsa de Papel Kraft PALVETI"], 0, 0, 1.0)
+        ])
 
-    # Receta 2: Hogaza Multicereales & Centeno (Fuerza 80%, Centeno 20% = 100% harina base; Agua 78%, MM 20%, Sal 2.1%, Semillas 15%)
-    receta2_id = 2
-    cursor.executemany("""
-    INSERT INTO receta_ingredientes (receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad)
-    VALUES (?, ?, ?, ?, ?)
-    """, [
-        (receta2_id, ing_map["Harina de Fuerza 13% Proteína"], 1, 80.0, 0),
-        (receta2_id, ing_map["Harina Integral de Centeno"], 1, 20.0, 0),
-        (receta2_id, ing_map["Agua Filtrada"], 0, 78.0, 0),
-        (receta2_id, ing_map["Masa Madre Activa 100% Hidratación"], 0, 20.0, 0),
-        (receta2_id, ing_map["Sal Marina Fina"], 0, 2.1, 0),
-        (receta2_id, ing_map["Semillas Mixtas (Sésamo, Chía, Girasol)"], 0, 15.0, 0),
-        (receta2_id, ing_map["Bolsa de Papel Kraft PALVETI"], 0, 0, 1.0)
-    ])
+        # Clientes
+        cursor.executemany("""
+        INSERT INTO clientes (nombre, telefono, direccion, preferencias, tipo_cliente)
+        VALUES (?, ?, ?, ?, ?)
+        """, [
+            ("Sofía Mendoza", "+57 300 123 4567", "Calle 10 # 43-22", "Corteza bien dorada, entrega en la mañana", "Minorista"),
+            ("Carlos Restrepo", "+57 311 987 6543", "Carrera 25 # 12-40", "Fanático del pan con semillas, pide cada semana", "Minorista"),
+            ("Café & Arte Bistro", "+57 320 555 8899", "Avenida Jardín # 8-15", "Hogazas rebanadas para tostadas artesanales (15 unidades/semana)", "Mayorista"),
+            ("Restaurante La Cava Rústica", "+57 315 444 1122", "Zona Rosa Cl 8 # 32-10", "Focaccias y hogazas rústicas para servicio de mesa", "Mayorista")
+        ])
 
-    # Clientes de ejemplo
-    cursor.executemany("""
-    INSERT INTO clientes (nombre, telefono, direccion, preferencias)
-    VALUES (?, ?, ?, ?)
-    """, [
-        ("Sofía Mendoza", "+57 300 123 4567", "Calle 10 # 43-22", "Corteza bien dorada, entrega en la mañana"),
-        ("Carlos Restrepo", "+57 311 987 6543", "Carrera 25 # 12-40", "Fanático del pan con semillas, pide 2 hogazas cada viernes"),
-        ("Café & Arte Bistro", "+57 320 555 8899", "Avenida Jardín # 8-15", "Hogazas rebanadas para tostadas artesanales")
-    ])
+        # Lote de producción
+        today = datetime.now().strftime("%Y-%m-%d")
+        cursor.execute("""
+        INSERT INTO lotes_produccion (codigo_lote, receta_id, unidades_programadas, peso_hogaza_g, unidades_reales, fecha_amasado, fecha_horneado, estado, inventario_descontado, costo_total_lote)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (f"LOTE-{today}-VIE-01", 1, 16, 850, 16, today, today, "EN_FERMENTACION", 1, 72000.0))
+        lote_id = cursor.lastrowid
 
-    # Lote de producción inicial
-    today = datetime.now().strftime("%Y-%m-%d")
-    cursor.execute("""
-    INSERT INTO lotes_produccion (codigo_lote, receta_id, unidades_programadas, peso_hogaza_g, unidades_reales, fecha_amasado, fecha_horneado, estado, inventario_descontado, costo_total_lote)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (f"LOTE-{today}-VIE-01", 1, 16, 850, 16, today, today, "EN_FERMENTACION", 1, 18.24))
-    lote_id = cursor.lastrowid
+        # Bitácora
+        cursor.execute("""
+        INSERT INTO bitacora_fermentacion (lote_id, temp_ambiente_amasado_c, temp_final_masa_c, duracion_autolisis_min, tiempo_bloque_horas, pliegues_realizados, tiempo_retardo_frio_horas, temp_nevera_c, evaluacion_calidad, observaciones_calidad)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (lote_id, 23.5, 25.0, 45, 4.5, 4, 16.0, 4.0, 5, "Excelente desarrollo de gluten. Salto de horno previsto alto."))
 
-    # Bitácora de fermentación inicial
-    cursor.execute("""
-    INSERT INTO bitacora_fermentacion (lote_id, temp_ambiente_amasado_c, temp_final_masa_c, duracion_autolisis_min, tiempo_bloque_horas, pliegues_realizados, tiempo_retardo_frio_horas, temp_nevera_c, evaluacion_calidad, observaciones_calidad)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (lote_id, 23.5, 25.2, 45, 4.5, 4, 16.0, 4.0, 5, "Excelente desarrollo de gluten. Salto de horno previsto alto."))
+        # Pedidos
+        cursor.executemany("""
+        INSERT INTO pedidos (cliente_id, lote_id, receta_id, unidades, fecha_entrega, estado, total_cobrado, metodo_pago, notas)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            (1, lote_id, 1, 2, today, "EN_FERMENTACION", 44000.0, "Transferencia", "Entregar antes de las 11 AM"),
+            (2, lote_id, 1, 1, today, "PAGADO", 22000.0, "Efectivo", "Pasa a recoger al taller"),
+            (3, lote_id, 1, 6, today, "REGISTRADO", 120000.0, "Transferencia", "Pedido mayorista bistró semanal")
+        ])
 
-    # Pedidos de ejemplo
-    cursor.executemany("""
-    INSERT INTO pedidos (cliente_id, lote_id, receta_id, unidades, fecha_entrega, estado, total_cobrado, metodo_pago, notas)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, [
-        (1, lote_id, 1, 2, today, "EN_FERMENTACION", 11.00, "Transferencia", "Entregar antes de las 11 AM"),
-        (2, lote_id, 1, 1, today, "PAGADO", 5.50, "Efectivo", "Pasa a recoger al taller"),
-        (3, lote_id, 1, 6, today, "REGISTRADO", 33.00, "Transferencia", "Pedido regular bistró")
-    ])
+        # Gastos operativos
+        cursor.executemany("""
+        INSERT INTO gastos_operativos (concepto, categoria, monto, fecha)
+        VALUES (?, ?, ?, ?)
+        """, [
+            ("Cilindro de Gas para Horno", "Energia/Gas", 115000.0, today),
+            ("Papel sulfurizado para bandejas (pack)", "Empaque", 38000.0, today)
+        ])
 
-    # Gastos operativos iniciales
-    cursor.executemany("""
-    INSERT INTO gastos_operativos (concepto, categoria, monto, fecha)
-    VALUES (?, ?, ?, ?)
-    """, [
-        ("Cilindro de Gas para Horno", "Energia/Gas", 45.00, today),
-        ("Papel sulfurizado para bandejas (pack)", "Empaque", 12.50, today)
-    ])
+    # Verificar si tabla de mantenimiento está vacía y sembrar datos de ejemplo
+    cursor.execute("SELECT COUNT(*) FROM mantenimiento_equipos")
+    if cursor.fetchone()[0] == 0:
+        hoy = date.today()
+        equipos_base = [
+            ("Horno de Solera Refractario", "Limpieza de piedras refractarias y revisión de termocupla", 15, (hoy - timedelta(days=10)).strftime("%Y-%m-%d"), (hoy + timedelta(days=5)).strftime("%Y-%m-%d"), "AL DÍA", "Panadero Jefe", "No usar agua sobre la piedra caliente"),
+            ("Amasadora de Espiral", "Lubricación de cadena motriz y revisión de correa", 30, (hoy - timedelta(days=28)).strftime("%Y-%m-%d"), (hoy + timedelta(days=2)).strftime("%Y-%m-%d"), "PRÓXIMO", "Técnico Mantenimiento", "Revisar tensión de correa"),
+            ("Nevera de Fermentación / Retardo", "Limpieza de condensador, filtro y calibración de termostato", 30, (hoy - timedelta(days=35)).strftime("%Y-%m-%d"), (hoy - timedelta(days=5)).strftime("%Y-%m-%d"), "VENCIDO", "Panadero Jefe", "Temperatura objetivo: 4°C estables"),
+            ("Bannetons de Caña y Telas de Lino", "Secado al horno suave y cepillado profundo de exceso de harina", 7, (hoy - timedelta(days=4)).strftime("%Y-%m-%d"), (hoy + timedelta(days=3)).strftime("%Y-%m-%d"), "AL DÍA", "Equipo Obrador", "Evitar humedad para prevenir hongos"),
+            ("Filtro de Agua de 3 Etapas", "Cambio de cartucho de sedimentos y carbón activado", 90, (hoy - timedelta(days=70)).strftime("%Y-%m-%d"), (hoy + timedelta(days=20)).strftime("%Y-%m-%d"), "AL DÍA", "Proveedor Purificadores", "Esencial para el cloro en masa madre")
+        ]
+        cursor.executemany("""
+        INSERT INTO mantenimiento_equipos (equipo, tarea, frecuencia_dias, ultima_fecha, proxima_fecha, estado, responsable, notas)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, equipos_base)
+
+    # Verificar si tabla de actividades está vacía y sembrar datos de ejemplo
+    cursor.execute("SELECT COUNT(*) FROM calendario_actividades")
+    if cursor.fetchone()[0] == 0:
+        hoy = date.today()
+        # Generar ciclo semanal típico de panadería artesanal
+        lunes = hoy - timedelta(days=hoy.weekday())
+        actividades_base = [
+            ((lunes).strftime("%Y-%m-%d"), "🛒 Compra de Insumos", "Comprar Harinas y Semillas en Molino", "Abastecer harina de fuerza, centeno y papel kraft para la semana", 1),
+            ((lunes + timedelta(days=1)).strftime("%Y-%m-%d"), "📢 Apertura de Preventa", "Abrir Catálogo y Pedidos por WhatsApp/Instagram", "Publicar menú de horneado para el viernes y sábado", 1),
+            ((lunes + timedelta(days=2)).strftime("%Y-%m-%d"), "🌾 Refresco de Masa Madre Madre", "Alimentar fermentos para producción masiva", "Pase de masa madre 1:2:2 para arrancar prefermento", 0),
+            ((lunes + timedelta(days=3)).strftime("%Y-%m-%d"), "🔒 Cierre de Pedidos", "Cierre de Preventa a las 8:00 PM", "Consolidar lista de producción y pesaje de harina", 0),
+            ((lunes + timedelta(days=3)).strftime("%Y-%m-%d"), "🥣 Amasado y Formado", "Amasado, Autólisis, Bloque y Formado a Banneton", "Pasar hogazas formadas a retardo en frío 16 horas", 0),
+            ((lunes + timedelta(days=4)).strftime("%Y-%m-%d"), "🔥 Día de Horneado", "Horneado Lote Viernes desde las 5:00 AM", "Calentar horno a 240°C, greñado con navaja y vapor inicial", 0),
+            ((lunes + timedelta(days=4)).strftime("%Y-%m-%d"), "📦 Entrega de Pedidos", "Despacho y Entrega de Hogazas", "Reparto a restaurantes y entregas a clientes particulares", 0),
+            ((lunes + timedelta(days=5)).strftime("%Y-%m-%d"), "🧹 Mantenimiento y Limpieza", "Limpieza profunda de obrador y mantenimiento", "Limpieza de mesas de acero, bannetons y hornos", 0)
+        ]
+        cursor.executemany("""
+        INSERT INTO calendario_actividades (fecha, tipo_actividad, titulo, descripcion, completada)
+        VALUES (?, ?, ?, ?, ?)
+        """, actividades_base)
 
     conn.commit()
 
 if __name__ == "__main__":
     init_db()
-    print("Base de datos inicializada correctamente.")
+    print("Base de datos PALVETI configurada y migrada en Pesos Colombianos (COP).")
