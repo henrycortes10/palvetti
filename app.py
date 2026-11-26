@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
+import calendar
 import sqlite3
 
 from database import init_db, get_connection
@@ -249,6 +250,63 @@ st.sidebar.markdown("""
     Obrador Local SQLite
 </div>
 """, unsafe_allow_html=True)
+
+# ==========================================================
+# BARRA SUPERIOR Y CENTRO DE NOTIFICACIONES (VISIBLE EN TODOS LOS MÓDULOS)
+# ==========================================================
+notifs = baker_math.get_all_system_notifications()
+total_alertas = notifs["total"]
+
+top_bar_left, top_bar_right = st.columns([3.8, 1.4])
+with top_bar_left:
+    dias_semana_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    meses_es = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+    f_hoy = date.today()
+    fecha_bonita = f"{dias_semana_es[f_hoy.weekday()]}, {f_hoy.day} de {meses_es[f_hoy.month - 1]} de {f_hoy.year}"
+    st.markdown(f"<div style='padding-top: 6px; color: #64748B; font-size: 0.95rem; font-weight: 500;'>📍 <b>Obrador PALVETI</b> &nbsp;•&nbsp; 📅 {fecha_bonita}</div>", unsafe_allow_html=True)
+
+with top_bar_right:
+    btn_notif_label = f"🔔 Alertas Activas ({total_alertas})" if total_alertas > 0 else "🔔 Alertas (0)"
+    with st.popover(btn_notif_label, use_container_width=True):
+        st.markdown("### 🔔 Centro de Alertas PALVETI")
+        if total_alertas == 0:
+            st.success("🎉 **¡Todo al día!** No tienes alertas pendientes de mantenimiento, insumos, pedidos ni actividades del calendario.")
+        else:
+            st.markdown(f"Tienes **{total_alertas} alerta(s) activa(s)** que requieren tu atención:")
+
+            # 1. Avisos de Calendario (antelación de 1 a 2 días o el mismo día)
+            if notifs["calendario"]:
+                st.markdown("#### 📅 Avisos de Calendario (Anticipación)")
+                for c in notifs["calendario"]:
+                    if "HOY" in c["titulo"]:
+                        st.error(f"**{c['titulo']}**\n\n{c['detalle']}")
+                    elif "MAÑANA" in c["titulo"]:
+                        st.warning(f"**{c['titulo']}**\n\n{c['detalle']}")
+                    else:
+                        st.info(f"**{c['titulo']}**\n\n{c['detalle']}")
+
+            # 2. Alertas de Pedidos
+            if notifs["pedidos"]:
+                st.markdown("#### 🛒 Alertas de Pedidos")
+                for p in notifs["pedidos"]:
+                    st.warning(f"**{p['titulo']}**\n\n{p['detalle']}")
+
+            # 3. Alertas de Insumos
+            if notifs["inventario"]:
+                st.markdown("#### 📦 Reabastecimiento de Insumos")
+                for s in notifs["inventario"]:
+                    st.error(f"**{s['titulo']}**\n\n{s['detalle']}")
+
+            # 4. Alertas de Mantenimiento
+            if notifs["mantenimiento"]:
+                st.markdown("#### 🛠️ Mantenimiento de Equipos")
+                for m in notifs["mantenimiento"]:
+                    if "VENCIDO" in m["titulo"]:
+                        st.error(f"**{m['titulo']}**\n\n{m['detalle']}")
+                    else:
+                        st.warning(f"**{m['titulo']}**\n\n{m['detalle']}")
+
+st.markdown("<hr style='margin-top: 4px; margin-bottom: 22px; border-color: #E2E8F0;'>", unsafe_allow_html=True)
 
 # ==========================================================
 # MÓDULO 1: CALCULADORA DE PRODUCCIÓN Y RECETAS
@@ -1169,115 +1227,367 @@ elif menu == "📊 6. Finanzas & Reportes":
             st.info("No hay gastos registrados en el período seleccionado.")
 
 # ==========================================================
-# MÓDULO 7: CALENDARIO DE ACTIVIDADES (NUEVO)
+# MÓDULO 7: CALENDARIO DE ACTIVIDADES (VISTA GOOGLE CALENDAR)
 # ==========================================================
 elif menu == "📅 7. Calendario de Actividades":
     st.markdown('<div class="main-header">📅 Calendario de Actividades & Ritmo Semanal</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Planificación operativa del obrador: compra de insumos, apertura/cierre de preventa y días de horneado</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Vista tipo Google Calendar con actividades diferenciadas por color, vista mensual, semanal y edición diaria</div>', unsafe_allow_html=True)
+
+    # Paleta de colores distintivos por tipo de actividad
+    CAL_ESTILOS = {
+        "🛒 Compra de Insumos & Harinas": {"bg": "#E8F5E9", "border": "#2E7D32", "text": "#1B5E20", "chip": "#10B981", "badge": "🛒 Compras"},
+        "📢 Apertura de Preventa (WhatsApp/Redes)": {"bg": "#E3F2FD", "border": "#1976D2", "text": "#0D47A1", "chip": "#3B82F6", "badge": "📢 Preventa"},
+        "🔒 Cierre de Pedidos": {"bg": "#FFEBEE", "border": "#D32F2F", "text": "#B71C1C", "chip": "#EF4444", "badge": "🔒 Cierre"},
+        "🥣 Amasado, Autólisis y Formado": {"bg": "#FFF8E1", "border": "#D97706", "text": "#B45309", "chip": "#F59E0B", "badge": "🥣 Amasado"},
+        "🔥 Día de Horneado & Empaque": {"bg": "#FBE9E7", "border": "#991B1B", "text": "#7F1D1D", "chip": "#991B1B", "badge": "🔥 Horneado"},
+        "📦 Despacho y Entrega de Pedidos": {"bg": "#F3E5F5", "border": "#7B1FA2", "text": "#4A148C", "chip": "#8B5CF6", "badge": "📦 Entrega"},
+        "🌾 Refresco de Masa Madre": {"bg": "#FEF3C7", "border": "#B45309", "text": "#78350F", "chip": "#D97706", "badge": "🌾 Masa Madre"},
+        "🧹 Mantenimiento y Limpieza": {"bg": "#ECEFF1", "border": "#546E7A", "text": "#263238", "chip": "#64748B", "badge": "🧹 Limpieza"}
+    }
+    ESTILO_DEFAULT = {"bg": "#F1F5F9", "border": "#475569", "text": "#1E293B", "chip": "#64748B", "badge": "📌 Tarea"}
 
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("SELECT * FROM calendario_actividades ORDER BY fecha ASC, id ASC")
-    actividades = cur.fetchall()
+    actividades_raw = cur.fetchall()
     conn.close()
 
-    col_cal_top1, col_cal_top2 = st.columns([2, 1])
+    actividades_list = [dict(a) for a in actividades_raw]
 
-    with col_cal_top1:
-        st.markdown("### 🗓️ Agenda de Operaciones")
-        filtro_estado_cal = st.radio("Mostrar:", ["Todas las Actividades", "Solo Pendientes", "Solo Completadas"], horizontal=True)
+    # Agrupar actividades por fecha 'YYYY-MM-DD'
+    actividades_por_fecha = {}
+    for a in actividades_list:
+        f = a["fecha"]
+        if f not in actividades_por_fecha:
+            actividades_por_fecha[f] = []
+        actividades_por_fecha[f].append(a)
 
-    with col_cal_top2:
-        st.write("")
-        st.caption("Organiza tus días de compra, refrescos de masa madre, apertura de preventa, amasado y entrega.")
+    tab_mes, tab_sem, tab_agenda, tab_nueva = st.tabs([
+        "📅 Vista Mensual (Google Calendar)",
+        "📆 Vista Semanal",
+        "📋 Agenda / Lista Cronológica",
+        "➕ Agendar Nueva Actividad"
+    ])
 
-    # Filtrar
-    actividades_filtradas = []
-    for a in actividades:
-        if filtro_estado_cal == "Solo Pendientes" and a["completada"] == 1:
-            continue
-        if filtro_estado_cal == "Solo Completadas" and a["completada"] == 0:
-            continue
-        actividades_filtradas.append(a)
+    hoy = date.today()
 
-    if not actividades_filtradas:
-        st.info("No hay actividades registradas en esta vista.")
-    else:
-        for a in actividades_filtradas:
-            with st.container():
-                c_chk, c_act_info, c_del = st.columns([0.5, 5, 0.8])
-                with c_chk:
-                    chk_val = bool(a["completada"])
-                    if st.checkbox("", value=chk_val, key=f"chk_act_{a['id']}"):
-                        if not chk_val:
-                            conn = get_connection()
-                            cur = conn.cursor()
-                            cur.execute("UPDATE calendario_actividades SET completada = 1 WHERE id = ?", (a["id"],))
-                            conn.commit()
-                            conn.close()
-                            st.rerun()
+    # Inicializar estado del calendario si no existe
+    if "cal_nav_year" not in st.session_state:
+        st.session_state["cal_nav_year"] = hoy.year
+    if "cal_nav_month" not in st.session_state:
+        st.session_state["cal_nav_month"] = hoy.month
+
+    # 1. VISTA MENSUAL (GOOGLE CALENDAR GRID)
+    with tab_mes:
+        col_nav1, col_nav2, col_nav3, col_nav4 = st.columns([1, 1, 2.5, 1.5])
+        with col_nav1:
+            if st.button("◀️ Mes Anterior", use_container_width=True):
+                if st.session_state["cal_nav_month"] == 1:
+                    st.session_state["cal_nav_month"] = 12
+                    st.session_state["cal_nav_year"] -= 1
+                else:
+                    st.session_state["cal_nav_month"] -= 1
+                st.rerun()
+
+        with col_nav2:
+            if st.button("Mes Siguiente ▶️", use_container_width=True):
+                if st.session_state["cal_nav_month"] == 12:
+                    st.session_state["cal_nav_month"] = 1
+                    st.session_state["cal_nav_year"] += 1
+                else:
+                    st.session_state["cal_nav_month"] += 1
+                st.rerun()
+
+        cal_year = st.session_state["cal_nav_year"]
+        cal_month = st.session_state["cal_nav_month"]
+        nombres_meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+
+        with col_nav3:
+            st.markdown(f"<h3 style='margin:0; padding-top:4px; text-align:center; color:#991b1b;'>📅 {nombres_meses[cal_month - 1]} {cal_year}</h3>", unsafe_allow_html=True)
+
+        with col_nav4:
+            if st.button("📍 Ir a Hoy", use_container_width=True):
+                st.session_state["cal_nav_year"] = hoy.year
+                st.session_state["cal_nav_month"] = hoy.month
+                st.rerun()
+
+        # Leyenda de Colores
+        st.markdown("""
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin: 15px 0 10px 0; font-size: 0.82rem;">
+            <span style="background-color: #E8F5E9; border-left: 3px solid #10B981; color: #1B5E20; padding: 2px 7px; border-radius: 3px; font-weight:600;">🛒 Insumos</span>
+            <span style="background-color: #E3F2FD; border-left: 3px solid #3B82F6; color: #0D47A1; padding: 2px 7px; border-radius: 3px; font-weight:600;">📢 Preventa</span>
+            <span style="background-color: #FFF8E1; border-left: 3px solid #F59E0B; color: #B45309; padding: 2px 7px; border-radius: 3px; font-weight:600;">🥣 Amasado</span>
+            <span style="background-color: #FFEBEE; border-left: 3px solid #EF4444; color: #B71C1C; padding: 2px 7px; border-radius: 3px; font-weight:600;">🔒 Cierre Pedidos</span>
+            <span style="background-color: #FBE9E7; border-left: 3px solid #991B1B; color: #7F1D1D; padding: 2px 7px; border-radius: 3px; font-weight:600;">🔥 Horneado</span>
+            <span style="background-color: #F3E5F5; border-left: 3px solid #8B5CF6; color: #4A148C; padding: 2px 7px; border-radius: 3px; font-weight:600;">📦 Entrega</span>
+            <span style="background-color: #FEF3C7; border-left: 3px solid #D97706; color: #78350F; padding: 2px 7px; border-radius: 3px; font-weight:600;">🌾 Masa Madre</span>
+            <span style="background-color: #ECEFF1; border-left: 3px solid #64748B; color: #263238; padding: 2px 7px; border-radius: 3px; font-weight:600;">🧹 Mantenimiento</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Generar matriz del mes
+        semanas = calendar.monthcalendar(cal_year, cal_month)
+        dias_encabezado = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+
+        # Encabezado de días de la semana
+        cols_header = st.columns(7)
+        for i, nom_dia in enumerate(dias_encabezado):
+            cols_header[i].markdown(f"<div style='text-align:center; font-weight:700; color:#475569; font-size:0.85rem; padding: 6px 0; background-color:#F8FAFC; border-radius:4px;'>{nom_dia}</div>", unsafe_allow_html=True)
+
+        # Celdas por semana
+        for sem in semanas:
+            cols_dia = st.columns(7)
+            for d_idx, dia_num in enumerate(sem):
+                with cols_dia[d_idx]:
+                    if dia_num == 0:
+                        st.markdown("<div style='min-height:95px; background-color:#FAFAFA; border:1px solid #F1F5F9; border-radius:6px; opacity:0.4;'></div>", unsafe_allow_html=True)
                     else:
-                        if chk_val:
-                            conn = get_connection()
-                            cur = conn.cursor()
-                            cur.execute("UPDATE calendario_actividades SET completada = 0 WHERE id = ?", (a["id"],))
-                            conn.commit()
-                            conn.close()
-                            st.rerun()
+                        fecha_str = f"{cal_year}-{cal_month:02d}-{dia_num:02d}"
+                        es_hoy = (cal_year == hoy.year and cal_month == hoy.month and dia_num == hoy.day)
+                        
+                        # Estilo del número de día
+                        if es_hoy:
+                            num_badge = f"<span style='background-color:#991b1b; color:#FFFFFF; padding:2px 7px; border-radius:12px; font-weight:700; font-size:0.85rem;'>{dia_num} HOY</span>"
+                            b_border = "2px solid #991b1b"
+                        else:
+                            num_badge = f"<span style='font-weight:700; color:#334155; font-size:0.9rem;'>{dia_num}</span>"
+                            b_border = "1px solid #E2E8F0"
 
-                with c_act_info:
-                    tachado = "~~" if a["completada"] == 1 else ""
-                    st.markdown(f"**{tachado}{a['fecha']} | {a['tipo_actividad']}: {a['titulo']}{tachado}**")
-                    if a["descripcion"]:
-                        st.caption(f"{a['descripcion']}")
+                        # Actividades de esta fecha
+                        acts_del_dia = actividades_por_fecha.get(fecha_str, [])
+                        chips_html = ""
+                        for a in acts_del_dia:
+                            estilo = CAL_ESTILOS.get(a["tipo_actividad"], ESTILO_DEFAULT)
+                            tachado = "text-decoration: line-through; opacity: 0.6;" if a["completada"] == 1 else ""
+                            chips_html += f"""
+                            <div style="background-color: {estilo['bg']}; border-left: 3px solid {estilo['chip']}; color: {estilo['text']}; padding: 2px 4px; border-radius: 3px; font-size: 0.72rem; margin-top: 3px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; {tachado}" title="{a['tipo_actividad']}: {a['titulo']}">
+                                {a['titulo']}
+                            </div>
+                            """
 
-                with c_del:
-                    if st.button("🗑️", key=f"del_act_{a['id']}", help="Eliminar actividad"):
+                        st.markdown(f"""
+                        <div style="min-height:95px; background-color:#FFFFFF; border:{b_border}; border-radius:6px; padding:5px; margin-bottom:5px; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                                {num_badge}
+                            </div>
+                            {chips_html}
+                        </div>
+                        """, unsafe_allow_html=True)
+
+        st.markdown("---")
+        # Gestor y editor de actividades del mes seleccionado
+        st.markdown("### 🔎 Gestor y Editor de Actividades por Día")
+        fechas_con_actividades = sorted(list(actividades_por_fecha.keys()), reverse=True)
+        if fechas_con_actividades:
+            col_sel_f, col_sel_info = st.columns([1.5, 2.5])
+            with col_sel_f:
+                sel_fecha_gestionar = st.selectbox("Seleccionar Fecha a Consultar o Editar:", fechas_con_actividades)
+            
+            with col_sel_info:
+                st.write("")
+                st.caption(f"Actividades agendadas para el **{sel_fecha_gestionar}**:")
+
+            acts_de_esa_fecha = actividades_por_fecha.get(sel_fecha_gestionar, [])
+            for a in acts_de_esa_fecha:
+                estilo = CAL_ESTILOS.get(a["tipo_actividad"], ESTILO_DEFAULT)
+                with st.expander(f"{estilo['badge']} - {a['titulo']} {'(✅ Completada)' if a['completada'] == 1 else '(⏳ Pendiente)'}"):
+                    with st.form(f"form_ed_act_mes_{a['id']}"):
+                        ed_f1, ed_f2 = st.columns([1, 1])
+                        with ed_f1:
+                            nueva_fecha = st.date_input("Fecha:", value=datetime.strptime(a["fecha"], "%Y-%m-%d").date(), key=f"f_cal_ed_{a['id']}")
+                        with ed_f2:
+                            nuevo_tipo = st.selectbox(
+                                "Tipo de Actividad:",
+                                list(CAL_ESTILOS.keys()),
+                                index=list(CAL_ESTILOS.keys()).index(a["tipo_actividad"]) if a["tipo_actividad"] in CAL_ESTILOS else 0,
+                                key=f"tipo_cal_ed_{a['id']}"
+                            )
+
+                        nuevo_tit = st.text_input("Título:", value=a["titulo"], key=f"tit_cal_ed_{a['id']}")
+                        nueva_desc = st.text_area("Detalles:", value=a["descripcion"] or "", key=f"desc_cal_ed_{a['id']}")
+                        nuevo_estado_comp = st.checkbox("Marcar como Completada", value=bool(a["completada"]), key=f"comp_cal_ed_{a['id']}")
+
+                        col_btn1, col_btn2 = st.columns([1, 1])
+                        with col_btn1:
+                            if st.form_submit_button("💾 Guardar Cambios"):
+                                conn = get_connection()
+                                cur = conn.cursor()
+                                cur.execute("""
+                                UPDATE calendario_actividades
+                                SET fecha = ?, tipo_actividad = ?, titulo = ?, descripcion = ?, completada = ?
+                                WHERE id = ?
+                                """, (nueva_fecha.strftime("%Y-%m-%d"), nuevo_tipo, nuevo_tit, nueva_desc, 1 if nuevo_estado_comp else 0, a["id"]))
+                                conn.commit()
+                                conn.close()
+                                st.success("Actividad actualizada.")
+                                st.rerun()
+
+                    if st.button(f"🗑️ Eliminar Actividad #{a['id']}", key=f"del_btn_mes_{a['id']}", type="secondary"):
                         conn = get_connection()
                         cur = conn.cursor()
                         cur.execute("DELETE FROM calendario_actividades WHERE id = ?", (a["id"],))
                         conn.commit()
                         conn.close()
+                        st.warning("Actividad eliminada.")
                         st.rerun()
+        else:
+            st.info("No hay actividades registradas en el calendario.")
 
-                st.divider()
+    # 2. VISTA SEMANAL
+    with tab_sem:
+        st.markdown("### 📆 Vista Semanal del Obrador")
+        # Calcular lunes de la semana actual
+        lunes_actual = hoy - timedelta(days=hoy.weekday())
+        col_sem_nav1, col_sem_nav2 = st.columns([2, 1])
+        with col_sem_nav1:
+            offset_semanas = st.number_input("Navegar semanas (0 = Esta semana, +1 = Próxima semana, -1 = Anterior):", value=0, step=1)
+        
+        lunes_sel = lunes_actual + timedelta(weeks=offset_semanas)
+        domingo_sel = lunes_sel + timedelta(days=6)
+        
+        st.markdown(f"**Semana:** Del **{lunes_sel.strftime('%d/%m/%Y')}** al **{domingo_sel.strftime('%d/%m/%Y')}**")
 
-    # Formulario para agendar nueva actividad
-    with st.expander("➕ Agendar Nueva Actividad Operativa"):
-        with st.form("form_nueva_actividad"):
-            c_f1, c_f2 = st.columns([1, 1])
-            with c_f1:
-                act_fecha = st.date_input("Fecha Programada:", value=date.today())
-            with c_f2:
-                act_tipo = st.selectbox(
-                    "Tipo de Actividad:",
-                    [
-                        "🛒 Compra de Insumos & Harinas",
-                        "📢 Apertura de Preventa (WhatsApp/Redes)",
-                        "🔒 Cierre de Pedidos",
-                        "🥣 Amasado, Autólisis y Formado",
-                        "🔥 Día de Horneado & Empaque",
-                        "📦 Despacho y Entrega de Pedidos",
-                        "🌾 Refresco de Masa Madre",
-                        "🧹 Mantenimiento y Limpieza"
-                    ]
-                )
+        dias_cols = st.columns(7)
+        for i in range(7):
+            d_fecha = lunes_sel + timedelta(days=i)
+            d_fecha_str = d_fecha.strftime("%Y-%m-%d")
+            es_dia_hoy = (d_fecha == hoy)
 
-            act_titulo = st.text_input("Título de la Tarea (ej: Comprar 2 bultos de harina de fuerza en molino)")
-            act_desc = st.text_area("Detalles u observaciones")
+            with dias_cols[i]:
+                header_bg = "#991b1b" if es_dia_hoy else "#475569"
+                header_txt = "#FFFFFF"
+                st.markdown(f"""
+                <div style="background-color:{header_bg}; color:{header_txt}; padding:6px; border-radius:6px; text-align:center; font-size:0.85rem; font-weight:700; margin-bottom:8px;">
+                    {dias_encabezado[i]}<br><span style="font-size:1rem;">{d_fecha.day}</span>
+                </div>
+                """, unsafe_allow_html=True)
 
-            submit_act = st.form_submit_button("Guardar en Calendario", type="primary")
-            if submit_act and act_titulo:
-                conn = get_connection()
-                cur = conn.cursor()
-                cur.execute("""
-                INSERT INTO calendario_actividades (fecha, tipo_actividad, titulo, descripcion, completada)
-                VALUES (?, ?, ?, ?, 0)
-                """, (act_fecha.strftime("%Y-%m-%d"), act_tipo, act_titulo, act_desc))
-                conn.commit()
-                conn.close()
-                st.success(f"Actividad '{act_titulo}' agendada.")
-                st.rerun()
+                acts_del_dia = actividades_por_fecha.get(d_fecha_str, [])
+                if not acts_del_dia:
+                    st.caption("Sin tareas")
+                else:
+                    for a in acts_del_dia:
+                        estilo = CAL_ESTILOS.get(a["tipo_actividad"], ESTILO_DEFAULT)
+                        tachado = "line-through" if a["completada"] == 1 else "none"
+                        st.markdown(f"""
+                        <div style="background-color:{estilo['bg']}; border-left:4px solid {estilo['chip']}; color:{estilo['text']}; padding:6px; border-radius:4px; font-size:0.8rem; margin-bottom:6px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+                            <b style="text-decoration:{tachado};">{a['titulo']}</b><br>
+                            <span style="font-size:0.75rem; color:{estilo['text']};">{estilo['badge']}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+    # 3. AGENDA / LISTA CRONOLÓGICA
+    with tab_agenda:
+        st.markdown("### 📋 Agenda Cronológica de Actividades")
+        col_filtro1, col_filtro2 = st.columns([1, 1])
+        with col_filtro1:
+            filtro_est = st.radio("Estado de Tarea:", ["Todas", "Solo Pendientes", "Solo Completadas"], horizontal=True)
+        with col_filtro2:
+            filtro_tipo = st.selectbox("Filtrar por Tipo:", ["Todos los tipos"] + list(CAL_ESTILOS.keys()))
+
+        acts_agenda = []
+        for a in actividades_list:
+            if filtro_est == "Solo Pendientes" and a["completada"] == 1:
+                continue
+            if filtro_est == "Solo Completadas" and a["completada"] == 0:
+                continue
+            if filtro_tipo != "Todos los tipos" and a["tipo_actividad"] != filtro_tipo:
+                continue
+            acts_agenda.append(a)
+
+        if not acts_agenda:
+            st.info("No se encontraron actividades con los filtros seleccionados.")
+        else:
+            for a in acts_agenda:
+                estilo = CAL_ESTILOS.get(a["tipo_actividad"], ESTILO_DEFAULT)
+                with st.container():
+                    col_chk, col_info, col_act_btns = st.columns([0.4, 4.2, 1.4])
+                    with col_chk:
+                        is_comp = bool(a["completada"])
+                        if st.checkbox("", value=is_comp, key=f"chk_ag_{a['id']}"):
+                            if not is_comp:
+                                conn = get_connection()
+                                cur = conn.cursor()
+                                cur.execute("UPDATE calendario_actividades SET completada = 1 WHERE id = ?", (a["id"],))
+                                conn.commit()
+                                conn.close()
+                                st.rerun()
+                        else:
+                            if is_comp:
+                                conn = get_connection()
+                                cur = conn.cursor()
+                                cur.execute("UPDATE calendario_actividades SET completada = 0 WHERE id = ?", (a["id"],))
+                                conn.commit()
+                                conn.close()
+                                st.rerun()
+
+                    with col_info:
+                        tachado = "~~" if a["completada"] == 1 else ""
+                        st.markdown(f"📅 **{a['fecha']}** | <span style='background-color:{estilo['bg']}; border-left:3px solid {estilo['chip']}; color:{estilo['text']}; padding:2px 6px; border-radius:3px; font-weight:600; font-size:0.8rem;'>{estilo['badge']}</span> **{tachado}{a['titulo']}{tachado}**", unsafe_allow_html=True)
+                        if a["descripcion"]:
+                            st.caption(f"{a['descripcion']}")
+
+                    with col_act_btns:
+                        exp_ed_ag = st.expander("✏️ Editar")
+                        with exp_ed_ag:
+                            with st.form(f"form_ed_ag_{a['id']}"):
+                                n_f = st.date_input("Fecha:", value=datetime.strptime(a["fecha"], "%Y-%m-%d").date(), key=f"f_ag_{a['id']}")
+                                n_t = st.selectbox("Tipo:", list(CAL_ESTILOS.keys()), index=list(CAL_ESTILOS.keys()).index(a["tipo_actividad"]) if a["tipo_actividad"] in CAL_ESTILOS else 0, key=f"t_ag_{a['id']}")
+                                n_tit = st.text_input("Título:", value=a["titulo"], key=f"tit_ag_{a['id']}")
+                                n_desc = st.text_area("Detalle:", value=a["descripcion"] or "", key=f"desc_ag_{a['id']}")
+                                if st.form_submit_button("Guardar"):
+                                    conn = get_connection()
+                                    cur = conn.cursor()
+                                    cur.execute("UPDATE calendario_actividades SET fecha = ?, tipo_actividad = ?, titulo = ?, descripcion = ? WHERE id = ?", (n_f.strftime("%Y-%m-%d"), n_t, n_tit, n_desc, a["id"]))
+                                    conn.commit()
+                                    conn.close()
+                                    st.success("Guardado.")
+                                    st.rerun()
+                        
+                        if st.button("🗑️", key=f"del_ag_{a['id']}", help="Eliminar tarea"):
+                            conn = get_connection()
+                            cur = conn.cursor()
+                            cur.execute("DELETE FROM calendario_actividades WHERE id = ?", (a["id"],))
+                            conn.commit()
+                            conn.close()
+                            st.rerun()
+
+                    st.divider()
+
+    # 4. AGENDAR NUEVA ACTIVIDAD
+    with tab_nueva:
+        st.markdown("### ➕ Agendar Nueva Actividad en el Calendario")
+        with st.form("form_nueva_actividad_full"):
+            col_na1, col_na2 = st.columns([1, 1])
+            with col_na1:
+                nueva_act_fecha = st.date_input("Fecha Programada:", value=date.today())
+            with col_na2:
+                nueva_act_tipo = st.selectbox("Tipo de Actividad:", list(CAL_ESTILOS.keys()))
+
+            nueva_act_tit = st.text_input("Título de la Tarea (ej: Horneado Lote Especial de Masa Madre)")
+            nueva_act_desc = st.text_area("Descripción u observaciones técnicas")
+
+            estilo_sel = CAL_ESTILOS.get(nueva_act_tipo, ESTILO_DEFAULT)
+            st.markdown(f"""
+            <div style="background-color:{estilo_sel['bg']}; border-left:4px solid {estilo_sel['chip']}; color:{estilo_sel['text']}; padding:8px; border-radius:5px; font-size:0.85rem; margin:10px 0;">
+                💡 <b>Vista previa del color:</b> {estilo_sel['badge']} - Se notificará con aviso previo en la campana de alertas 1 día antes y el día del evento.
+            </div>
+            """, unsafe_allow_html=True)
+
+            if st.form_submit_button("🚀 Programar en el Calendario", type="primary"):
+                if nueva_act_tit:
+                    conn = get_connection()
+                    cur = conn.cursor()
+                    cur.execute("""
+                    INSERT INTO calendario_actividades (fecha, tipo_actividad, titulo, descripcion, completada)
+                    VALUES (?, ?, ?, ?, 0)
+                    """, (nueva_act_fecha.strftime("%Y-%m-%d"), nueva_act_tipo, nueva_act_tit, nueva_act_desc))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Actividad '{nueva_act_tit}' agendada exitosamente.")
+                    st.rerun()
+                else:
+                    st.error("Por favor ingresa un título para la actividad.")
 
 # ==========================================================
 # MÓDULO 8: MANTENIMIENTO DE EQUIPOS (NUEVO)

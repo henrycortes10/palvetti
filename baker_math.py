@@ -264,3 +264,122 @@ def complete_maintenance(task_id):
     conn.commit()
     conn.close()
     return True
+
+def get_all_system_notifications():
+    """
+    Consolida todas las alertas y notificaciones del sistema para la campana superior:
+    1. Mantenimiento de equipos (vencidos o próximos en <= 3 días)
+    2. Reabastecimiento de insumos (stock <= mínimo)
+    3. Pedidos (entregas para hoy, mañana o registrados pendientes)
+    4. Actividades del calendario (hoy, mañana o próximos 2 días para prever con antelación)
+    """
+    hoy = date.today()
+    manana = hoy + timedelta(days=1)
+    en_2_dias = hoy + timedelta(days=2)
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # 1. Mantenimiento
+    cursor.execute("SELECT * FROM mantenimiento_equipos ORDER BY proxima_fecha ASC")
+    maint_rows = cursor.fetchall()
+    notif_maint = []
+    for m in maint_rows:
+        prox = datetime.strptime(m["proxima_fecha"], "%Y-%m-%d").date()
+        diff = (prox - hoy).days
+        if diff < 0:
+            notif_maint.append({
+                "tipo": "mantenimiento_vencido",
+                "titulo": f"🔴 VENCIDO: {m['equipo']}",
+                "detalle": f"Mantenimiento '{m['tarea']}' venció hace {abs(diff)} día(s)."
+            })
+        elif diff <= 3:
+            notif_maint.append({
+                "tipo": "mantenimiento_proximo",
+                "titulo": f"🟡 PRÓXIMO ({diff} d): {m['equipo']}",
+                "detalle": f"'{m['tarea']}' programado para el {m['proxima_fecha']}."
+            })
+
+    # 2. Insumos
+    cursor.execute("SELECT nombre, stock_actual, stock_minimo, unidad_medida FROM ingredientes WHERE stock_actual <= stock_minimo")
+    stock_rows = cursor.fetchall()
+    notif_stock = []
+    for s in stock_rows:
+        notif_stock.append({
+            "tipo": "stock_bajo",
+            "titulo": f"📦 Stock Bajo: {s['nombre']}",
+            "detalle": f"Quedan solo {s['stock_actual']:g} {s['unidad_medida']} (Mínimo: {s['stock_minimo']:g})."
+        })
+
+    # 3. Pedidos
+    cursor.execute("""
+    SELECT p.id, c.nombre as cliente, r.nombre as pan, p.unidades, p.fecha_entrega, p.estado
+    FROM pedidos p
+    JOIN clientes c ON p.cliente_id = c.id
+    JOIN recetas r ON p.receta_id = r.id
+    WHERE p.estado != 'ENTREGADO'
+    ORDER BY p.fecha_entrega ASC
+    """)
+    ped_rows = cursor.fetchall()
+    notif_ped = []
+    for p in ped_rows:
+        f_ent = datetime.strptime(p["fecha_entrega"], "%Y-%m-%d").date()
+        if f_ent == hoy:
+            notif_ped.append({
+                "tipo": "pedido_hoy",
+                "titulo": f"🚨 ENTREGA HOY: Pedido #{p['id']}",
+                "detalle": f"{p['unidades']}x {p['pan']} para {p['cliente']} (Estado: {p['estado']})."
+            })
+        elif f_ent == manana:
+            notif_ped.append({
+                "tipo": "pedido_manana",
+                "titulo": f"⏰ ENTREGA MAÑANA: Pedido #{p['id']}",
+                "detalle": f"{p['unidades']}x {p['pan']} para {p['cliente']}."
+            })
+        elif f_ent < hoy:
+            notif_ped.append({
+                "tipo": "pedido_atrasado",
+                "titulo": f"⚠️ PEDIDO PENDIENTE: #{p['id']}",
+                "detalle": f"Fecha prevista era {p['fecha_entrega']} ({p['cliente']})."
+            })
+
+    # 4. Calendario de actividades importantes (Antelación de 1 a 2 días o el mismo día)
+    cursor.execute("""
+    SELECT * FROM calendario_actividades
+    WHERE completada = 0
+    ORDER BY fecha ASC
+    """)
+    cal_rows = cursor.fetchall()
+    notif_cal = []
+    for c in cal_rows:
+        f_act = datetime.strptime(c["fecha"], "%Y-%m-%d").date()
+        if f_act == hoy:
+            notif_cal.append({
+                "tipo": "actividad_hoy",
+                "titulo": f"🔥 HOY: {c['tipo_actividad']}",
+                "detalle": f"{c['titulo']}"
+            })
+        elif f_act == manana:
+            notif_cal.append({
+                "tipo": "actividad_manana",
+                "titulo": f"🔔 MAÑANA: {c['tipo_actividad']} (Aviso previo)",
+                "detalle": f"{c['titulo']} (Programado para mañana {c['fecha']})."
+            })
+        elif f_act == en_2_dias:
+            notif_cal.append({
+                "tipo": "actividad_proxima",
+                "titulo": f"📅 EN 2 DÍAS: {c['tipo_actividad']}",
+                "detalle": f"{c['titulo']} (Fecha: {c['fecha']})."
+            })
+
+    conn.close()
+
+    total_count = len(notif_maint) + len(notif_stock) + len(notif_ped) + len(notif_cal)
+
+    return {
+        "total": total_count,
+        "mantenimiento": notif_maint,
+        "inventario": notif_stock,
+        "pedidos": notif_ped,
+        "calendario": notif_cal
+    }
