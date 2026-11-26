@@ -4,7 +4,9 @@ from datetime import datetime, date, timedelta
 import sqlite3
 
 from database import init_db, get_connection
+import importlib
 import baker_math
+importlib.reload(baker_math)
 
 # Configuración de página
 st.set_page_config(
