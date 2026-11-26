@@ -209,7 +209,7 @@ st.markdown("""
     .badge-proximo { background-color: #FEF3C7; color: #B45309; font-weight: 700; }
     .badge-aldia { background-color: #D1FAE5; color: #065F46; font-weight: 700; }
 
-    /* ANIMACIÓN HOVER ZOOM PARA RECUA DROS DEL CALENDARIO */
+    /* ANIMACIÓN HOVER ZOOM Y CONTENEDORES PARA EL CALENDARIO */
     .cal-day-cell {
         min-height: 96px;
         background-color: #FFFFFF;
@@ -223,10 +223,63 @@ st.markdown("""
     }
 
     .cal-day-cell:hover {
-        transform: scale(1.05) translateY(-3px) !important;
-        box-shadow: 0 10px 22px rgba(153, 27, 27, 0.15) !important;
+        transform: scale(1.04) translateY(-2px) !important;
+        box-shadow: 0 8px 20px rgba(153, 27, 27, 0.15) !important;
         border-color: #991b1b !important;
         z-index: 25 !important;
+    }
+
+    /* CONTENEDOR DE CADA RECUA DRO DEL CALENDARIO MENSUAL */
+    div[data-testid="stColumn"] div[data-testid="stVerticalBlockBorderWrapper"] {
+        transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.22s ease, border-color 0.22s ease !important;
+        border-radius: 8px !important;
+        background-color: #FFFFFF !important;
+        padding: 4px 6px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04) !important;
+    }
+
+    div[data-testid="stColumn"] div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        transform: scale(1.04) translateY(-2px) !important;
+        box-shadow: 0 8px 20px rgba(153, 27, 27, 0.15) !important;
+        border-color: #991b1b !important;
+        z-index: 20 !important;
+    }
+
+    /* REDUCCIÓN DE ESPACIADO INTERNO EN CADA CELDA */
+    div[data-testid="stColumn"] div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stVerticalBlock"] {
+        gap: 0.15rem !important;
+    }
+
+    /* DESTACADO PARA EL DÍA DE HOY */
+    div[data-testid="stColumn"] div[data-testid="stVerticalBlockBorderWrapper"]:has(.cal-badge-hoy) {
+        border: 2px solid #991b1b !important;
+        background-color: #FFFDFD !important;
+    }
+
+    /* BOTONES COMPACTOS DENTRO DE LAS CELDAS (+ Y EDITAR) EN LA ESQUINA SUPERIOR DERECHA */
+    div[data-testid="stColumn"] div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stButton"] {
+        text-align: right !important;
+    }
+
+    div[data-testid="stColumn"] div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stButton"] button {
+        min-height: 22px !important;
+        height: 24px !important;
+        padding: 0 6px !important;
+        font-size: 0.72rem !important;
+        font-weight: 700 !important;
+        line-height: 1 !important;
+        border-radius: 5px !important;
+        border: 1px solid #CBD5E1 !important;
+        background-color: #F8FAFC !important;
+        color: #475569 !important;
+        box-shadow: none !important;
+        float: right !important;
+    }
+
+    div[data-testid="stColumn"] div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stButton"] button:hover {
+        border-color: #991B1B !important;
+        color: #991B1B !important;
+        background-color: #FEF2F2 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1444,37 +1497,37 @@ elif menu == "📅 7. Calendario de Actividades":
             for d_idx, dia_num in enumerate(sem):
                 with cols_dia[d_idx]:
                     if dia_num == 0:
-                        st.markdown("<div style='min-height:95px; background-color:#FAFAFA; border:1px solid #F1F5F9; border-radius:6px; opacity:0.4;'></div>", unsafe_allow_html=True)
+                        st.markdown("<div style='height:118px; background-color:#FAFAFA; border:1px dashed #E2E8F0; border-radius:8px; opacity:0.35;'></div>", unsafe_allow_html=True)
                     else:
                         fecha_str = f"{cal_year}-{cal_month:02d}-{dia_num:02d}"
                         es_hoy = (cal_year == hoy.year and cal_month == hoy.month and dia_num == hoy.day)
-                        
-                        # Estilo del número de día
-                        if es_hoy:
-                            num_badge = f"<span style='background-color:#991b1b; color:#FFFFFF; padding:2px 7px; border-radius:12px; font-weight:700; font-size:0.85rem;'>{dia_num} HOY</span>"
-                            b_border = "2px solid #991b1b"
-                        else:
-                            num_badge = f"<span style='font-weight:700; color:#334155; font-size:0.9rem;'>{dia_num}</span>"
-                            b_border = "1px solid #E2E8F0"
-
-                        # Actividades de esta fecha
                         acts_del_dia = actividades_por_fecha.get(fecha_str, [])
-                        chips_html = ""
-                        for a in acts_del_dia:
-                            estilo = CAL_ESTILOS.get(a["tipo_actividad"], ESTILO_DEFAULT)
-                            tachado = "text-decoration:line-through;opacity:0.6;" if a["completada"] == 1 else ""
-                            chips_html += f'<div style="background-color:{estilo["bg"]};border-left:3px solid {estilo["chip"]};color:{estilo["text"]};padding:2px 5px;border-radius:3px;font-size:0.73rem;margin-top:3px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;{tachado}" title="{a["tipo_actividad"]}: {a["titulo"]}">{a["titulo"]}</div>'
 
-                        cell_html = f'<div class="cal-day-cell" style="border:{b_border};"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">{num_badge}</div>{chips_html}</div>'
-                        st.markdown(cell_html, unsafe_allow_html=True)
+                        with st.container(border=True, height=118):
+                            # Encabezado superior: Número de día a la izquierda y Botón de acción a la derecha
+                            col_c_num, col_c_btn = st.columns([1, 1], vertical_alignment="center")
+                            with col_c_num:
+                                if es_hoy:
+                                    st.markdown(f"<span class='cal-badge-hoy' style='background-color:#991b1b; color:#FFFFFF; padding:1px 6px; border-radius:10px; font-weight:700; font-size:0.75rem; white-space:nowrap;'>{dia_num} HOY</span>", unsafe_allow_html=True)
+                                else:
+                                    st.markdown(f"<span style='font-weight:700; color:#334155; font-size:0.92rem; padding-left:1px;'>{dia_num}</span>", unsafe_allow_html=True)
 
-                        # Botón interactivo directo en cada recuadro para desplegar menú de edición
-                        if acts_del_dia:
-                            if st.button(f"✏️ Editar ({len(acts_del_dia)})", key=f"btn_dia_{fecha_str}", use_container_width=True):
-                                modal_gestionar_dia(fecha_str, acts_del_dia)
-                        else:
-                            if st.button("➕", key=f"btn_add_{fecha_str}", use_container_width=True, help=f"Agendar actividad en {fecha_str}"):
-                                modal_gestionar_dia(fecha_str, [])
+                            with col_c_btn:
+                                if acts_del_dia:
+                                    if st.button("✏️ Editar", key=f"btn_dia_{fecha_str}", use_container_width=True, help=f"Editar actividades ({len(acts_del_dia)}) del {fecha_str}"):
+                                        modal_gestionar_dia(fecha_str, acts_del_dia)
+                                else:
+                                    if st.button("➕", key=f"btn_add_{fecha_str}", use_container_width=True, help=f"Agendar actividad en {fecha_str}"):
+                                        modal_gestionar_dia(fecha_str, [])
+
+                            # Actividades / Etiquetas dentro del mismo recuadro
+                            if acts_del_dia:
+                                chips_html = ""
+                                for a in acts_del_dia:
+                                    estilo = CAL_ESTILOS.get(a["tipo_actividad"], ESTILO_DEFAULT)
+                                    tachado = "text-decoration:line-through;opacity:0.6;" if a["completada"] == 1 else ""
+                                    chips_html += f'<div style="background-color:{estilo["bg"]};border-left:3px solid {estilo["chip"]};color:{estilo["text"]};padding:2px 5px;border-radius:3px;font-size:0.72rem;margin-top:2px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;{tachado}" title="{a["tipo_actividad"]}: {a["titulo"]}">{a["titulo"]}</div>'
+                                st.markdown(chips_html, unsafe_allow_html=True)
 
         st.markdown("---")
         # Gestor y editor de actividades del mes seleccionado
