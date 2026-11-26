@@ -208,6 +208,26 @@ st.markdown("""
     .badge-vencido { background-color: #FEE2E2; color: #991B1B; font-weight: 700; }
     .badge-proximo { background-color: #FEF3C7; color: #B45309; font-weight: 700; }
     .badge-aldia { background-color: #D1FAE5; color: #065F46; font-weight: 700; }
+
+    /* ANIMACIÓN HOVER ZOOM PARA RECUA DROS DEL CALENDARIO */
+    .cal-day-cell {
+        min-height: 96px;
+        background-color: #FFFFFF;
+        border-radius: 8px;
+        padding: 6px;
+        margin-bottom: 5px;
+        transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.22s ease, border-color 0.22s ease !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        position: relative;
+        cursor: pointer;
+    }
+
+    .cal-day-cell:hover {
+        transform: scale(1.05) translateY(-3px) !important;
+        box-shadow: 0 10px 22px rgba(153, 27, 27, 0.15) !important;
+        border-color: #991b1b !important;
+        z-index: 25 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1262,6 +1282,90 @@ elif menu == "📅 7. Calendario de Actividades":
             actividades_por_fecha[f] = []
         actividades_por_fecha[f].append(a)
 
+    # Modal interactivo tipo Google Calendar para editar o gestionar actividades del día
+    @st.dialog("📅 Gestión de Actividades del Día")
+    def modal_gestionar_dia(fecha_sel, lista_acts):
+        dias_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+        meses_es = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+        f_obj = datetime.strptime(fecha_sel, "%Y-%m-%d").date()
+        fecha_txt = f"{dias_es[f_obj.weekday()]}, {f_obj.day} de {meses_es[f_obj.month - 1]} de {f_obj.year}"
+        st.markdown(f"### 🗓️ {fecha_txt}")
+        
+        tab_m_ver, tab_m_add = st.tabs([f"✏️ Actividades Registradas ({len(lista_acts)})", "➕ Añadir Nueva Tarea"])
+        
+        with tab_m_ver:
+            if not lista_acts:
+                st.info("No hay actividades registradas para esta fecha.")
+            else:
+                for a in lista_acts:
+                    estilo = CAL_ESTILOS.get(a["tipo_actividad"], ESTILO_DEFAULT)
+                    st.markdown(f"""
+                    <div style="background-color:{estilo['bg']}; border-left:4px solid {estilo['chip']}; padding:6px 10px; border-radius:5px; margin-bottom:8px;">
+                        <b style="color:{estilo['text']};">{estilo['badge']}</b> - <span style="font-size:0.95rem; font-weight:600;">{a['titulo']}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    with st.form(f"form_modal_ed_{a['id']}"):
+                        m_f1, m_f2 = st.columns([1, 1])
+                        with m_f1:
+                            m_n_fecha = st.date_input("Fecha:", value=datetime.strptime(a["fecha"], "%Y-%m-%d").date(), key=f"mf_f_{a['id']}")
+                        with m_f2:
+                            m_n_tipo = st.selectbox(
+                                "Tipo:",
+                                list(CAL_ESTILOS.keys()),
+                                index=list(CAL_ESTILOS.keys()).index(a["tipo_actividad"]) if a["tipo_actividad"] in CAL_ESTILOS else 0,
+                                key=f"mf_t_{a['id']}"
+                            )
+                        m_n_tit = st.text_input("Título:", value=a["titulo"], key=f"mf_tit_{a['id']}")
+                        m_n_desc = st.text_area("Detalles u observaciones:", value=a["descripcion"] or "", key=f"mf_desc_{a['id']}")
+                        m_n_comp = st.checkbox("Marcar como Completada", value=bool(a["completada"]), key=f"mf_chk_{a['id']}")
+                        
+                        col_sav, col_del = st.columns([1, 1])
+                        with col_sav:
+                            if st.form_submit_button("💾 Guardar Cambios", type="primary"):
+                                conn = get_connection()
+                                cur = conn.cursor()
+                                cur.execute("""
+                                UPDATE calendario_actividades
+                                SET fecha = ?, tipo_actividad = ?, titulo = ?, descripcion = ?, completada = ?
+                                WHERE id = ?
+                                """, (m_n_fecha.strftime("%Y-%m-%d"), m_n_tipo, m_n_tit, m_n_desc, 1 if m_n_comp else 0, a["id"]))
+                                conn.commit()
+                                conn.close()
+                                st.success("Actividad modificada exitosamente.")
+                                st.rerun()
+
+                    if st.button(f"🗑️ Eliminar Actividad '{a['titulo']}'", key=f"del_modal_btn_{a['id']}", type="secondary"):
+                        conn = get_connection()
+                        cur = conn.cursor()
+                        cur.execute("DELETE FROM calendario_actividades WHERE id = ?", (a["id"],))
+                        conn.commit()
+                        conn.close()
+                        st.warning("Actividad eliminada.")
+                        st.rerun()
+                    st.divider()
+
+        with tab_m_add:
+            st.markdown(f"**Programar nueva actividad para el {fecha_sel}:**")
+            with st.form(f"form_modal_add_{fecha_sel}"):
+                add_tipo = st.selectbox("Tipo de Actividad:", list(CAL_ESTILOS.keys()), key=f"madd_t_{fecha_sel}")
+                add_tit = st.text_input("Título:", key=f"madd_tit_{fecha_sel}")
+                add_desc = st.text_area("Detalles u observaciones:", key=f"madd_desc_{fecha_sel}")
+                if st.form_submit_button("🚀 Programar Tarea", type="primary"):
+                    if add_tit:
+                        conn = get_connection()
+                        cur = conn.cursor()
+                        cur.execute("""
+                        INSERT INTO calendario_actividades (fecha, tipo_actividad, titulo, descripcion, completada)
+                        VALUES (?, ?, ?, ?, 0)
+                        """, (fecha_sel, add_tipo, add_tit, add_desc))
+                        conn.commit()
+                        conn.close()
+                        st.success("Actividad programada exitosamente.")
+                        st.rerun()
+                    else:
+                        st.error("Por favor ingresa un título.")
+
     tab_mes, tab_sem, tab_agenda, tab_nueva = st.tabs([
         "📅 Vista Mensual (Google Calendar)",
         "📆 Vista Semanal",
@@ -1361,8 +1465,16 @@ elif menu == "📅 7. Calendario de Actividades":
                             tachado = "text-decoration:line-through;opacity:0.6;" if a["completada"] == 1 else ""
                             chips_html += f'<div style="background-color:{estilo["bg"]};border-left:3px solid {estilo["chip"]};color:{estilo["text"]};padding:2px 5px;border-radius:3px;font-size:0.73rem;margin-top:3px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;{tachado}" title="{a["tipo_actividad"]}: {a["titulo"]}">{a["titulo"]}</div>'
 
-                        cell_html = f'<div style="min-height:95px;background-color:#FFFFFF;border:{b_border};border-radius:6px;padding:6px;margin-bottom:6px;box-shadow:0 1px 3px rgba(0,0,0,0.04);"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">{num_badge}</div>{chips_html}</div>'
+                        cell_html = f'<div class="cal-day-cell" style="border:{b_border};"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">{num_badge}</div>{chips_html}</div>'
                         st.markdown(cell_html, unsafe_allow_html=True)
+
+                        # Botón interactivo directo en cada recuadro para desplegar menú de edición
+                        if acts_del_dia:
+                            if st.button(f"✏️ Editar ({len(acts_del_dia)})", key=f"btn_dia_{fecha_str}", use_container_width=True):
+                                modal_gestionar_dia(fecha_str, acts_del_dia)
+                        else:
+                            if st.button("➕", key=f"btn_add_{fecha_str}", use_container_width=True, help=f"Agendar actividad en {fecha_str}"):
+                                modal_gestionar_dia(fecha_str, [])
 
         st.markdown("---")
         # Gestor y editor de actividades del mes seleccionado
@@ -1451,12 +1563,16 @@ elif menu == "📅 7. Calendario de Actividades":
                 acts_del_dia = actividades_por_fecha.get(d_fecha_str, [])
                 if not acts_del_dia:
                     st.caption("Sin tareas")
+                    if st.button("➕ Agendar", key=f"sem_btn_add_{d_fecha_str}", use_container_width=True):
+                        modal_gestionar_dia(d_fecha_str, [])
                 else:
                     for a in acts_del_dia:
                         estilo = CAL_ESTILOS.get(a["tipo_actividad"], ESTILO_DEFAULT)
                         tachado = "line-through" if a["completada"] == 1 else "none"
-                        card_html = f'<div style="background-color:{estilo["bg"]};border-left:4px solid {estilo["chip"]};color:{estilo["text"]};padding:6px;border-radius:4px;font-size:0.8rem;margin-bottom:6px;box-shadow:0 1px 2px rgba(0,0,0,0.05);"><b style="text-decoration:{tachado};">{a["titulo"]}</b><br><span style="font-size:0.75rem;color:{estilo["text"]};">{estilo["badge"]}</span></div>'
+                        card_html = f'<div class="cal-day-cell" style="background-color:{estilo["bg"]};border-left:4px solid {estilo["chip"]};color:{estilo["text"]};padding:6px;border-radius:4px;font-size:0.8rem;margin-bottom:6px;min-height:auto;"><b style="text-decoration:{tachado};">{a["titulo"]}</b><br><span style="font-size:0.75rem;color:{estilo["text"]};">{estilo["badge"]}</span></div>'
                         st.markdown(card_html, unsafe_allow_html=True)
+                    if st.button(f"✏️ Editar ({len(acts_del_dia)})", key=f"sem_btn_ed_{d_fecha_str}", use_container_width=True):
+                        modal_gestionar_dia(d_fecha_str, acts_del_dia)
 
     # 3. AGENDA / LISTA CRONOLÓGICA
     with tab_agenda:
