@@ -323,6 +323,26 @@ def remove_ingredient_from_recipe(receta_ingrediente_id):
     conn.close()
     return True
 
+def create_ingredient(nombre, categoria, unidad_medida, costo_unitario, stock_actual=1000.0, stock_minimo=100.0):
+    """Crea un nuevo insumo en el inventario o actualiza su costo si ya existe, y devuelve su ID."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM ingredientes WHERE LOWER(nombre) = LOWER(?)", (nombre.strip(),))
+    row = cur.fetchone()
+    if row:
+        ins_id = row["id"]
+        if costo_unitario > 0:
+            cur.execute("UPDATE ingredientes SET costo_unitario = ? WHERE id = ?", (float(costo_unitario), ins_id))
+    else:
+        cur.execute("""
+        INSERT INTO ingredientes (nombre, categoria, unidad_medida, stock_actual, stock_minimo, costo_unitario)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, (nombre.strip(), categoria, unidad_medida, float(stock_actual), float(stock_minimo), float(costo_unitario)))
+        ins_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return ins_id
+
 def delete_recipe(receta_id):
     """Elimina una receta y sus ingredientes vinculados."""
     conn = get_connection()

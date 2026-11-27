@@ -525,34 +525,68 @@ if menu == "🥖 1. Calculadora & Recetas (Núcleo)":
 
             st.markdown("---")
             st.markdown("##### ➕ Agregar un Ingrediente a esta Receta")
-            with st.form(f"form_add_ing_a_receta_{receta_id}"):
-                map_insumos_disp = {f"{i['nombre']} ({i['categoria']} - {i['unidad_medida']})": i for i in todos_insumos}
-                sel_ins_label = st.selectbox("Seleccionar Insumo del Inventario:", list(map_insumos_disp.keys()))
-                ins_seleccionado = map_insumos_disp[sel_ins_label]
+            
+            map_insumos_disp = {f"{i['nombre']} ({i['categoria']} - {i['unidad_medida']})": i for i in todos_insumos}
+            opciones_existente = ["➕ [Personalizado / Añadir OTRO insumo nuevo...]"] + list(map_insumos_disp.keys())
+            sel_ins_label = st.selectbox("Seleccionar Insumo:", opciones_existente, key=f"sel_ins_rec_existente_{receta_id}")
 
-                tipo_ing_rec = st.radio(
-                    "Tipo de uso en la receta:",
-                    ["Masa con Porcentaje de Panadero (%)", "Artículo Fijo por Hogaza (ej: 1 Bolsa, 1 Etiqueta)"],
-                    horizontal=True
-                )
+            es_personalizado_existente = (sel_ins_label == "➕ [Personalizado / Añadir OTRO insumo nuevo...]")
 
-                c_ing1, c_ing2 = st.columns(2)
-                if "Porcentaje" in tipo_ing_rec:
-                    with c_ing1:
-                        pct_panadero_val = st.number_input("% Panadero sobre Harina Base (%):", min_value=0.1, max_value=200.0, value=100.0 if ins_seleccionado["categoria"] == "harina" else 20.0, step=0.5)
-                    with c_ing2:
-                        es_harina_chk = st.checkbox("¿Es Harina Base Principal de la masa?", value=True if ins_seleccionado["categoria"] == "harina" and not ings_receta_actual else False)
-                    cant_fija_val = 0.0
+            if es_personalizado_existente:
+                st.markdown("""
+                <div style="background-color: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <b style="color: #166534;">✨ Registrar y Asignar Nuevo Insumo Personalizado al Inventario</b>
+                </div>
+                """, unsafe_allow_html=True)
+                col_c1, col_c2, col_c3, col_c4 = st.columns([3, 2, 2, 2])
+                with col_c1:
+                    c_nuevo_nombre = st.text_input("Nombre del Nuevo Insumo (ej: Harina de Espelta, Miel, Aceitunas, Mantequilla):", key=f"c_n_nom_{receta_id}")
+                with col_c2:
+                    c_nuevo_cat = st.selectbox("Categoría:", ["harina", "liquido", "fermento", "aditivo", "empaque", "servicio"], key=f"c_n_cat_{receta_id}")
+                with col_c3:
+                    c_nuevo_unidad = st.selectbox("Unidad:", ["g", "unidad", "ml", "kg"], key=f"c_n_un_{receta_id}")
+                with col_c4:
+                    if c_nuevo_unidad == "g":
+                        c_nuevo_costo_kg = st.number_input("Costo de Compra x Kilo ($ COP):", min_value=100.0, value=6500.0, step=100.0, key=f"c_n_pkg_{receta_id}")
+                        c_nuevo_costo_u = c_nuevo_costo_kg / 1000.0
+                    else:
+                        c_nuevo_costo_u = st.number_input(f"Costo x {c_nuevo_unidad} ($ COP):", min_value=1.0, value=1200.0, step=50.0, key=f"c_n_pu_{receta_id}")
+
+            tipo_ing_rec = st.radio(
+                "Tipo de uso en la receta:",
+                ["Masa con Porcentaje de Panadero (%)", "Artículo Fijo por Hogaza (ej: 1 Bolsa, 1 Etiqueta)"],
+                horizontal=True,
+                key=f"tipo_uso_existente_{receta_id}"
+            )
+
+            c_ing1, c_ing2 = st.columns(2)
+            if "Porcentaje" in tipo_ing_rec:
+                with c_ing1:
+                    categoria_sel = c_nuevo_cat if es_personalizado_existente else map_insumos_disp[sel_ins_label]["categoria"]
+                    pct_panadero_val = st.number_input("% Panadero sobre Harina Base (%):", min_value=0.1, max_value=250.0, value=100.0 if categoria_sel == "harina" else 20.0, step=0.5, key=f"pct_pan_{receta_id}")
+                with c_ing2:
+                    es_harina_chk = st.checkbox("¿Es Harina Base Principal de la masa?", value=True if categoria_sel == "harina" and not ings_receta_actual else False, key=f"chk_hb_{receta_id}")
+                cant_fija_val = 0.0
+            else:
+                with c_ing1:
+                    unidad_sel = c_nuevo_unidad if es_personalizado_existente else map_insumos_disp[sel_ins_label]["unidad_medida"]
+                    cant_fija_val = st.number_input(f"Cantidad por hogaza ({unidad_sel}):", min_value=0.1, max_value=50.0, value=1.0, step=1.0, key=f"cant_fija_{receta_id}")
+                with c_ing2:
+                    es_harina_chk = False
+                pct_panadero_val = 0.0
+
+            if st.button("➕ Añadir Ingrediente a la Receta", key=f"btn_add_ing_rec_{receta_id}", type="primary"):
+                from database import add_ingredient_to_recipe, create_ingredient
+                if es_personalizado_existente:
+                    if not c_nuevo_nombre or not c_nuevo_nombre.strip():
+                        st.error("Por favor escribe el nombre del nuevo insumo personalizado.")
+                    else:
+                        nuevo_ing_id = create_ingredient(c_nuevo_nombre.strip(), c_nuevo_cat, c_nuevo_unidad, c_nuevo_costo_u)
+                        add_ingredient_to_recipe(receta_id, nuevo_ing_id, es_harina_chk, pct_panadero_val, cant_fija_val)
+                        st.success(f"✅ ¡Insumo '{c_nuevo_nombre}' creado en el inventario y añadido a la receta!")
+                        st.rerun()
                 else:
-                    with c_ing1:
-                        cant_fija_val = st.number_input(f"Cantidad por hogaza ({ins_seleccionado['unidad_medida']}):", min_value=0.1, max_value=50.0, value=1.0, step=1.0)
-                    with c_ing2:
-                        es_harina_chk = False
-                    pct_panadero_val = 0.0
-
-                btn_add_ing = st.form_submit_button("➕ Añadir Ingrediente a la Receta", type="primary")
-                if btn_add_ing:
-                    from database import add_ingredient_to_recipe
+                    ins_seleccionado = map_insumos_disp[sel_ins_label]
                     add_ingredient_to_recipe(receta_id, ins_seleccionado["id"], es_harina_chk, pct_panadero_val, cant_fija_val)
                     st.success(f"✅ ¡Ingrediente '{ins_seleccionado['nombre']}' añadido/actualizado en la receta!")
                     st.rerun()
@@ -640,12 +674,33 @@ if menu == "🥖 1. Calculadora & Recetas (Núcleo)":
 
         # Selector interactivo para añadir cada ingrediente manualmente
         st.markdown("##### ➕ Añadir Ingrediente Manualmente a la Receta")
-        c_add_ins, c_add_tipo, c_add_pct, c_add_btn = st.columns([3, 2, 2, 1])
+        
+        insumos_dropdown = {f"{i['nombre']} ({i['categoria']} - {i['unidad_medida']})": i for i in catalogo_insumos}
+        opciones_nr = ["➕ [Personalizado / Añadir OTRO insumo nuevo...]"] + list(insumos_dropdown.keys())
+        sel_ins_key = st.selectbox("Seleccionar Insumo:", opciones_nr, key="nr_sel_insumo_dropdown")
+        es_cust_nr = (sel_ins_key == "➕ [Personalizado / Añadir OTRO insumo nuevo...]")
 
-        with c_add_ins:
-            insumos_dropdown = {f"{i['nombre']} ({i['categoria']} - {i['unidad_medida']})": i for i in catalogo_insumos}
-            sel_ins_key = st.selectbox("Seleccionar Insumo Estándar:", list(insumos_dropdown.keys()), key="nr_sel_insumo_dropdown")
-            ins_sel_obj = insumos_dropdown[sel_ins_key]
+        if es_cust_nr:
+            st.markdown("""
+            <div style="background-color: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                <b style="color: #166534;">✨ Registrar y Asignar Nuevo Insumo Personalizado al Inventario</b>
+            </div>
+            """, unsafe_allow_html=True)
+            col_nc1, col_nc2, col_nc3, col_nc4 = st.columns([3, 2, 2, 2])
+            with col_nc1:
+                nr_cust_nom = st.text_input("Nombre del Nuevo Insumo (ej: Harina de Espelta, Miel de Abejas, Aceitunas, Nueces):", key="nr_cust_nom")
+            with col_nc2:
+                nr_cust_cat = st.selectbox("Categoría:", ["harina", "liquido", "fermento", "aditivo", "empaque", "servicio"], key="nr_cust_cat")
+            with col_nc3:
+                nr_cust_un = st.selectbox("Unidad de Medida:", ["g", "unidad", "ml", "kg"], key="nr_cust_un")
+            with col_nc4:
+                if nr_cust_un == "g":
+                    nr_cust_pkg = st.number_input("Costo de Compra x Kilo ($ COP):", min_value=100.0, value=6500.0, step=100.0, key="nr_cust_pkg")
+                    nr_cust_costo_u = nr_cust_pkg / 1000.0
+                else:
+                    nr_cust_costo_u = st.number_input(f"Costo x {nr_cust_un} ($ COP):", min_value=1.0, value=1500.0, step=50.0, key="nr_cust_pu")
+
+        c_add_tipo, c_add_pct, c_add_btn = st.columns([2, 2, 1])
 
         with c_add_tipo:
             tipo_uso = st.radio(
@@ -655,35 +710,63 @@ if menu == "🥖 1. Calculadora & Recetas (Núcleo)":
             )
 
         with c_add_pct:
+            categoria_actual = nr_cust_cat if es_cust_nr else insumos_dropdown[sel_ins_key]["categoria"]
+            unidad_actual = nr_cust_un if es_cust_nr else insumos_dropdown[sel_ins_key]["unidad_medida"]
+
             if "Masa" in tipo_uso:
-                val_pct = st.number_input("% Panadero (%):", min_value=0.1, max_value=250.0, value=100.0 if ins_sel_obj["categoria"] == "harina" and not any(x.get("es_harina_base") for x in st.session_state["nr_ingredientes"]) else 15.0, step=0.5, key="nr_input_val_pct")
-                es_hb = st.checkbox("¿Es Harina Base (100%)?", value=True if ins_sel_obj["categoria"] == "harina" and not any(x.get("es_harina_base") for x in st.session_state["nr_ingredientes"]) else False, key="nr_chk_es_hb")
+                val_pct = st.number_input("% Panadero (%):", min_value=0.1, max_value=250.0, value=100.0 if categoria_actual == "harina" and not any(x.get("es_harina_base") for x in st.session_state["nr_ingredientes"]) else 15.0, step=0.5, key="nr_input_val_pct")
+                es_hb = st.checkbox("¿Es Harina Base (100%)?", value=True if categoria_actual == "harina" and not any(x.get("es_harina_base") for x in st.session_state["nr_ingredientes"]) else False, key="nr_chk_es_hb")
                 val_fijo = 0.0
             else:
-                val_fijo = st.number_input(f"Cantidad x Pan ({ins_sel_obj['unidad_medida']}):", min_value=0.1, max_value=50.0, value=1.0, step=1.0, key="nr_input_val_fijo")
+                val_fijo = st.number_input(f"Cantidad x Pan ({unidad_actual}):", min_value=0.1, max_value=50.0, value=1.0, step=1.0, key="nr_input_val_fijo")
                 val_pct = 0.0
                 es_hb = False
 
         with c_add_btn:
             st.write("")
             st.write("")
-            if st.button("➕ Añadir", key="nr_btn_add_to_list", type="primary"):
-                item_existente = next((idx for idx, x in enumerate(st.session_state["nr_ingredientes"]) if x["ing_id"] == ins_sel_obj["id"]), None)
-                nuevo_elem = {
-                    "ing_id": ins_sel_obj["id"],
-                    "nombre": ins_sel_obj["nombre"],
-                    "categoria": ins_sel_obj["categoria"],
-                    "unidad": ins_sel_obj["unidad_medida"],
-                    "es_harina_base": es_hb,
-                    "pct": float(val_pct),
-                    "fijo": float(val_fijo),
-                    "costo_u": float(ins_sel_obj["costo_unitario"])
-                }
-                if item_existente is not None:
-                    st.session_state["nr_ingredientes"][item_existente] = nuevo_elem
+            if st.button("➕ Añadir a Lista", key="nr_btn_add_to_list", type="primary"):
+                from database import create_ingredient
+                if es_cust_nr:
+                    if not nr_cust_nom or not nr_cust_nom.strip():
+                        st.error("Por favor escribe el nombre del nuevo insumo personalizado.")
+                    else:
+                        nuevo_id = create_ingredient(nr_cust_nom.strip(), nr_cust_cat, nr_cust_un, nr_cust_costo_u)
+                        nuevo_elem = {
+                            "ing_id": nuevo_id,
+                            "nombre": nr_cust_nom.strip(),
+                            "categoria": nr_cust_cat,
+                            "unidad": nr_cust_un,
+                            "es_harina_base": es_hb,
+                            "pct": float(val_pct),
+                            "fijo": float(val_fijo),
+                            "costo_u": float(nr_cust_costo_u)
+                        }
+                        item_existente = next((idx for idx, x in enumerate(st.session_state["nr_ingredientes"]) if x["ing_id"] == nuevo_id), None)
+                        if item_existente is not None:
+                            st.session_state["nr_ingredientes"][item_existente] = nuevo_elem
+                        else:
+                            st.session_state["nr_ingredientes"].append(nuevo_elem)
+                        st.success(f"✅ Insumo '{nr_cust_nom.strip()}' creado y añadido a la fórmula.")
+                        st.rerun()
                 else:
-                    st.session_state["nr_ingredientes"].append(nuevo_elem)
-                st.rerun()
+                    ins_sel_obj = insumos_dropdown[sel_ins_key]
+                    nuevo_elem = {
+                        "ing_id": ins_sel_obj["id"],
+                        "nombre": ins_sel_obj["nombre"],
+                        "categoria": ins_sel_obj["categoria"],
+                        "unidad": ins_sel_obj["unidad_medida"],
+                        "es_harina_base": es_hb,
+                        "pct": float(val_pct),
+                        "fijo": float(val_fijo),
+                        "costo_u": float(ins_sel_obj["costo_unitario"])
+                    }
+                    item_existente = next((idx for idx, x in enumerate(st.session_state["nr_ingredientes"]) if x["ing_id"] == ins_sel_obj["id"]), None)
+                    if item_existente is not None:
+                        st.session_state["nr_ingredientes"][item_existente] = nuevo_elem
+                    else:
+                        st.session_state["nr_ingredientes"].append(nuevo_elem)
+                    st.rerun()
 
         # Tabla visual en tiempo real de los ingredientes que se van añadiendo
         st.markdown("##### ⚖️ Tabla Visual de Composición de la Receta")
