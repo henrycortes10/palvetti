@@ -1,9 +1,10 @@
 # 🥖 PALVETI - Historial Completo del Proyecto y Conversación
 
-> **ID de Conversación Original:** `3cb8bb60-8d4b-45af-8251-e79ea248637d`  
-> **Fecha de guardado:** 26 de Noviembre de 2026  
+> **ID de Conversación Principal:** `3cb8bb60-8d4b-45af-8251-e79ea248637d` / `8238d46d-c430-466c-94e8-8a27a2ac6da7`  
+> **Última Actualización:** 26 de Noviembre de 2026 (Sesión Nocturna)  
+> **Detalle Específico de la Sesión:** Consultar [HISTORIAL_MODIFICACIONES_NOCHE.md](file:///c:/Users/barbas/Desktop/Proyectos/palveti/HISTORIAL_MODIFICACIONES_NOCHE.md)  
 > **Repositorio GitHub:** `https://github.com/henrycortes10/palvetti.git`  
-> **Ubicación Local:** `c:\Users\USER\Desktop\palvetti`
+> **URL en Producción:** `https://palvetti-web.streamlit.app`
 
 ---
 
