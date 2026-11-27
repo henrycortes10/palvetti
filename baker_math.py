@@ -16,6 +16,7 @@ def get_recipe_details(receta_id):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT r.*, 
+               ri.id as receta_ingrediente_id,
                ri.ingrediente_id, ri.es_harina_base, ri.porcentaje_panadero, ri.cantidad_fija_por_unidad,
                i.nombre as ingrediente_nombre, i.categoria, i.unidad_medida, i.costo_unitario, i.stock_actual, i.stock_minimo
         FROM recetas r
@@ -73,6 +74,7 @@ def calculate_production_batch(receta_id, unidades, peso_por_hogaza_g):
                 agua_g += gramos_totales
 
             ingredientes_calculados.append({
+                "receta_ingrediente_id": r["receta_ingrediente_id"],
                 "ingrediente_id": r["ingrediente_id"],
                 "nombre": r["ingrediente_nombre"],
                 "categoria": r["categoria"],
@@ -94,6 +96,7 @@ def calculate_production_batch(receta_id, unidades, peso_por_hogaza_g):
             costo_total_lote += costo_linea
 
             ingredientes_calculados.append({
+                "receta_ingrediente_id": r["receta_ingrediente_id"],
                 "ingrediente_id": r["ingrediente_id"],
                 "nombre": r["ingrediente_nombre"],
                 "categoria": r["categoria"],

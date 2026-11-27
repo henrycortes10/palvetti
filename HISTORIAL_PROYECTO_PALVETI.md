@@ -43,6 +43,8 @@ El asistente leerá todo este archivo y sabrá exactamente qué se ha hecho, qu�
    - Porcentajes panaderos con Harina al 100%.
    - Escalado dinámico por número de piezas y peso por pieza.
    - Inclusión automática de prefermento / masa madre y cálculo exacto de hidratación total.
+   - **Creador Completo de Recetas con Ingredientes:** Al crear una receta nueva se configuran tanto los datos técnicos (tiempos, temperaturas, pesos) como su lista completa de ingredientes (% Panadero para harinas, agua, masa madre, sal, aditivos y empaques).
+   - **Gestor Dinámico de Ingredientes por Receta:** Permite añadir, ajustar porcentajes o eliminar ingredientes en cualquier receta existente, generando de inmediato la tabla visual de pesaje y costos.
 2. **💰 2. Costos & Fijación de Precios (Módulo Financiero y Rentabilidad):**
    - **Cálculo Automático del Costo de Producción Unitario:** Multiplica dinámicamente los gramos y unidades de la tanda por el costo unitario de cada insumo en inventario, arrojando el costo exacto de producción por hogaza y por tanda completa.
    - **Desglose Detallado de Materia Prima y Materiales:** Tabla con porción por pan, total de la tanda, costo de adquisición (por kg o por unidad), costo por pan en COP y porcentaje de participación en el costo.

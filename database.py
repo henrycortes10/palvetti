@@ -293,6 +293,46 @@ def update_ingredient_cost(ingrediente_id, nuevo_costo_unitario):
     conn.close()
     return True
 
+def add_ingredient_to_recipe(receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad=0.0):
+    """Añade o actualiza un ingrediente dentro de una receta."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM receta_ingredientes WHERE receta_id = ? AND ingrediente_id = ?", (receta_id, ingrediente_id))
+    existing = cur.fetchone()
+    if existing:
+        cur.execute("""
+        UPDATE receta_ingredientes
+        SET es_harina_base = ?, porcentaje_panadero = ?, cantidad_fija_por_unidad = ?
+        WHERE id = ?
+        """, (int(es_harina_base), float(porcentaje_panadero), float(cantidad_fija_por_unidad), existing["id"]))
+    else:
+        cur.execute("""
+        INSERT INTO receta_ingredientes (receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad)
+        VALUES (?, ?, ?, ?, ?)
+        """, (receta_id, ingrediente_id, int(es_harina_base), float(porcentaje_panadero), float(cantidad_fija_por_unidad)))
+    conn.commit()
+    conn.close()
+    return True
+
+def remove_ingredient_from_recipe(receta_ingrediente_id):
+    """Elimina un ingrediente de una receta específica."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM receta_ingredientes WHERE id = ?", (int(receta_ingrediente_id),))
+    conn.commit()
+    conn.close()
+    return True
+
+def delete_recipe(receta_id):
+    """Elimina una receta y sus ingredientes vinculados."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM receta_ingredientes WHERE receta_id = ?", (int(receta_id),))
+    cur.execute("DELETE FROM recetas WHERE id = ?", (int(receta_id),))
+    conn.commit()
+    conn.close()
+    return True
+
 def seed_initial_data(conn):
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM ingredientes")
