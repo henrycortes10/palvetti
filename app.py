@@ -4,8 +4,18 @@ from datetime import datetime, date, timedelta
 import calendar
 import sqlite3
 
-from database import init_db, get_connection
 import importlib
+import database
+importlib.reload(database)
+from database import (
+    init_db,
+    get_connection,
+    create_ingredient,
+    add_ingredient_to_recipe,
+    remove_ingredient_from_recipe,
+    delete_recipe,
+    update_ingredient_cost
+)
 import baker_math
 importlib.reload(baker_math)
 
@@ -518,7 +528,6 @@ if menu == "🥖 1. Calculadora & Recetas (Núcleo)":
                             st.write(f"**{ing_item['cantidad_fija_por_unidad']:g}** {ing_item['unidad_medida']} / pan")
                     with c_del:
                         if st.button("🗑️ Quitar", key=f"del_ing_rec_{ing_item['ri_id']}"):
-                            from database import remove_ingredient_from_recipe
                             remove_ingredient_from_recipe(ing_item["ri_id"])
                             st.success(f"Eliminado '{ing_item['ing_nombre']}' de la receta.")
                             st.rerun()
@@ -576,7 +585,6 @@ if menu == "🥖 1. Calculadora & Recetas (Núcleo)":
                 pct_panadero_val = 0.0
 
             if st.button("➕ Añadir Ingrediente a la Receta", key=f"btn_add_ing_rec_{receta_id}", type="primary"):
-                from database import add_ingredient_to_recipe, create_ingredient
                 if es_personalizado_existente:
                     if not c_nuevo_nombre or not c_nuevo_nombre.strip():
                         st.error("Por favor escribe el nombre del nuevo insumo personalizado.")
@@ -596,7 +604,6 @@ if menu == "🥖 1. Calculadora & Recetas (Núcleo)":
             with st.expander("⚠️ Eliminar esta receta"):
                 st.warning(f"¿Deseas eliminar la receta **'{receta_sel_nombre}'**? Esta acción no se puede deshacer.")
                 if st.button("🗑️ Confirmar y Eliminar Receta", key=f"btn_del_rec_{receta_id}"):
-                    from database import delete_recipe
                     delete_recipe(receta_id)
                     st.success(f"Receta '{receta_sel_nombre}' eliminada.")
                     st.rerun()
@@ -726,7 +733,6 @@ if menu == "🥖 1. Calculadora & Recetas (Núcleo)":
             st.write("")
             st.write("")
             if st.button("➕ Añadir a Lista", key="nr_btn_add_to_list", type="primary"):
-                from database import create_ingredient
                 if es_cust_nr:
                     if not nr_cust_nom or not nr_cust_nom.strip():
                         st.error("Por favor escribe el nombre del nuevo insumo personalizado.")
@@ -1222,7 +1228,6 @@ elif menu == "📦 3. Inventario & Materia Prima":
 
             btn_act_costo = st.form_submit_button("💾 Guardar y Actualizar Costo de Compra", type="primary")
             if btn_act_costo:
-                from database import update_ingredient_cost
                 update_ingredient_cost(obj_insumo["id"], costo_calculado_gramo)
                 st.success(f"✅ ¡Costo actualizado para '{obj_insumo['nombre']}'! Nuevo valor: {baker_math.format_cop(costo_calculado_gramo * 1000 if unidad_ins == 'g' else costo_calculado_gramo)} {'/ kg' if unidad_ins == 'g' else 'por ' + unidad_ins}")
                 st.rerun()
