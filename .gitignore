@@ -21,3 +21,4 @@ Desktop.ini
 
 # Bases de datos (descomenta si prefieres no subir datos de producción)
 # *.db
+*.bak
