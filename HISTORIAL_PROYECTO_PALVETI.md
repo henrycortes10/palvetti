@@ -86,7 +86,17 @@ El asistente leerá todo este archivo y sabrá exactamente qué se ha hecho, qu�
 
 ---
 
-## 🚀 Cómo Iniciar la Aplicación en Cualquier PC
+## 🚀 Despliegue en la Nube (Streamlit Community Cloud)
+
+- **URL de Producción:** `https://palvetti-web.streamlit.app`
+- **Repositorio Conectado:** `https://github.com/henrycortes10/palvetti.git` (rama `main`)
+- **Configuración de Despliegue:**
+  - `requirements.txt`: Contiene `streamlit>=1.30.0` y `pandas>=2.0.0`.
+  - `.streamlit/config.toml`: Configurado con `headless = true` y `gatherUsageStats = false` para omitir el prompt interactivo de terminal y permitir que el healthcheck de Streamlit Cloud responda inmediatamente.
+
+---
+
+## 🚀 Cómo Iniciar la Aplicación en Cualquier PC (Modo Local)
 
 1. Asegúrate de tener instalado Python 3.10 o superior.
 2. Instala las dependencias:
