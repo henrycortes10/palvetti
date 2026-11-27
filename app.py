@@ -568,177 +568,236 @@ if menu == "🥖 1. Calculadora & Recetas (Núcleo)":
                     st.rerun()
 
     # ==========================================================
-    # CREAR NUEVA RECETA ESTANDARIZADA CON INGREDIENTES
+    # CREAR NUEVA RECETA ESTANDARIZADA CON INGREDIENTES DINÁMICOS
     # ==========================================================
-    with st.expander("➕ Crear Nueva Receta Estandarizada con sus Ingredientes"):
-        st.markdown("### 🥖 Creador de Receta con Porcentajes de Panadero")
-        st.caption("Configura los datos base de tu nuevo pan y selecciona sus ingredientes para generar automáticamente la tabla técnica de producción.")
+    with st.expander("➕ Crear Nueva Receta Estandarizada (Ingredientes Manuales y Personalizados)"):
+        st.markdown("### 🥖 Creador Dinámico de Recetas & Fórmulas Panaderas")
+        st.caption("Configura los datos técnicos y añade manualmente cada ingrediente seleccionándolo del catálogo estándar según su fórmula particular.")
+
+        # Inicializar lista dinámica de ingredientes en sesión
+        if "nr_ingredientes" not in st.session_state:
+            st.session_state["nr_ingredientes"] = []
+
+        st.markdown("#### 1. Ficha Técnica del Pan")
+        c_nom, c_sug = st.columns([2, 1])
+        with c_nom:
+            n_nombre = st.text_input("Nombre de la Receta (ej: Ciabatta al Romero, Baguette Tradición, Brioche Francés):", key="nr_input_nombre")
+        with c_sug:
+            n_precio_sug = st.number_input("Precio de Venta Sugerido inicial ($ COP):", min_value=1000, value=22000, step=1000, key="nr_input_precio")
+
+        n_desc = st.text_area("Descripción de la Receta (corteza, greñado, tipo de fermentación):", value="Pan artesanal de fermentación lenta en frío.", key="nr_input_desc")
+        
+        c_p1, c_p2, c_p3, c_p4 = st.columns(4)
+        with c_p1:
+            n_peso_crudo = st.number_input("Peso masa en crudo (g):", min_value=100.0, max_value=3000.0, value=850.0, step=50.0, key="nr_input_peso_crudo")
+        with c_p2:
+            n_peso_horneado = st.number_input("Peso horneado estimado (g):", min_value=100.0, max_value=3000.0, value=750.0, step=50.0, key="nr_input_peso_horneado")
+        with c_p3:
+            n_tiempo_h = st.number_input("Tiempo de horneado (min):", min_value=10, max_value=120, value=35, step=5, key="nr_input_tiempo")
+        with c_p4:
+            n_temp_h = st.number_input("Temp. Horno (°C):", min_value=150, max_value=300, value=230, step=5, key="nr_input_temp")
+
+        st.markdown("---")
+        st.markdown("#### 2. Composición de Ingredientes (% de Panadero)")
+        st.caption("Añade uno a uno los ingredientes específicos para este pan. Selecciona insumos estándar del inventario o configúralos con su porcentaje de panadero.")
 
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT id, nombre, categoria, unidad_medida FROM ingredientes ORDER BY categoria, nombre")
-        insumos_db = cur.fetchall()
+        cur.execute("SELECT id, nombre, categoria, unidad_medida, costo_unitario FROM ingredientes ORDER BY categoria, nombre")
+        catalogo_insumos = cur.fetchall()
         conn.close()
 
-        harinas_list = [i for i in insumos_db if i["categoria"] == "harina"]
-        liquidos_list = [i for i in insumos_db if i["categoria"] == "liquido"]
-        fermentos_list = [i for i in insumos_db if i["categoria"] == "fermento"]
-        aditivos_list = [i for i in insumos_db if i["categoria"] == "aditivo"]
-        empaques_list = [i for i in insumos_db if i["categoria"] in ("empaque", "servicio")]
+        # Botones de utilidad para cargar plantilla base o limpiar
+        c_quick1, c_quick2 = st.columns([1, 1])
+        with c_quick1:
+            if st.button("⚡ Cargar Fórmula Base Clásica (Harina 100%, Agua 75%, Masa Madre 20%, Sal 2%)", key="btn_load_base_template"):
+                ing_map_by_name = {i["nombre"]: i for i in catalogo_insumos}
+                h_fuerza = ing_map_by_name.get("Harina de Fuerza 13% Proteína")
+                agua = ing_map_by_name.get("Agua Filtrada")
+                mm = ing_map_by_name.get("Masa Madre Activa 100% Hidratación")
+                sal = ing_map_by_name.get("Sal Marina Fina")
+                bolsa = ing_map_by_name.get("Bolsa de Papel Kraft PALVETI")
+                
+                nueva_lista = []
+                if h_fuerza:
+                    nueva_lista.append({"ing_id": h_fuerza["id"], "nombre": h_fuerza["nombre"], "categoria": h_fuerza["categoria"], "unidad": "g", "es_harina_base": True, "pct": 100.0, "fijo": 0.0, "costo_u": h_fuerza["costo_unitario"]})
+                if agua:
+                    nueva_lista.append({"ing_id": agua["id"], "nombre": agua["nombre"], "categoria": agua["categoria"], "unidad": "g", "es_harina_base": False, "pct": 75.0, "fijo": 0.0, "costo_u": agua["costo_unitario"]})
+                if mm:
+                    nueva_lista.append({"ing_id": mm["id"], "nombre": mm["nombre"], "categoria": mm["categoria"], "unidad": "g", "es_harina_base": False, "pct": 20.0, "fijo": 0.0, "costo_u": mm["costo_unitario"]})
+                if sal:
+                    nueva_lista.append({"ing_id": sal["id"], "nombre": sal["nombre"], "categoria": sal["categoria"], "unidad": "g", "es_harina_base": False, "pct": 2.0, "fijo": 0.0, "costo_u": sal["costo_unitario"]})
+                if bolsa:
+                    nueva_lista.append({"ing_id": bolsa["id"], "nombre": bolsa["nombre"], "categoria": bolsa["categoria"], "unidad": "unidad", "es_harina_base": False, "pct": 0.0, "fijo": 1.0, "costo_u": bolsa["costo_unitario"]})
+                
+                st.session_state["nr_ingredientes"] = nueva_lista
+                st.rerun()
 
-        with st.form("form_nueva_receta_completa"):
-            st.markdown("#### 1. Ficha Técnica del Pan")
-            c_nom, c_sug = st.columns([2, 1])
-            with c_nom:
-                n_nombre = st.text_input("Nombre de la Receta (ej: Hogaza Rústica de Nueces y Dátiles):")
-            with c_sug:
-                n_precio_sug = st.number_input("Precio de Venta Sugerido inicial ($ COP):", min_value=1000, value=25000, step=1000)
+        with c_quick2:
+            if st.button("🧹 Limpiar Lista de Ingredientes", key="btn_clear_nr_ing"):
+                st.session_state["nr_ingredientes"] = []
+                st.rerun()
 
-            n_desc = st.text_area("Descripción de la Receta (corteza, greñado, notas de sabor):", value="Hogaza artesanal de fermentación lenta en frío con masa madre.")
-            
-            c_p1, c_p2, c_p3, c_p4 = st.columns(4)
-            with c_p1:
-                n_peso_crudo = st.number_input("Peso masa en crudo (g):", min_value=100.0, max_value=3000.0, value=850.0, step=50.0)
-            with c_p2:
-                n_peso_horneado = st.number_input("Peso horneado estimado (g):", min_value=100.0, max_value=3000.0, value=750.0, step=50.0)
-            with c_p3:
-                n_tiempo_h = st.number_input("Tiempo de horneado (min):", min_value=10, max_value=120, value=35, step=5)
-            with c_p4:
-                n_temp_h = st.number_input("Temp. Horno (°C):", min_value=150, max_value=300, value=230, step=5)
+        # Selector interactivo para añadir cada ingrediente manualmente
+        st.markdown("##### ➕ Añadir Ingrediente Manualmente a la Receta")
+        c_add_ins, c_add_tipo, c_add_pct, c_add_btn = st.columns([3, 2, 2, 1])
+
+        with c_add_ins:
+            insumos_dropdown = {f"{i['nombre']} ({i['categoria']} - {i['unidad_medida']})": i for i in catalogo_insumos}
+            sel_ins_key = st.selectbox("Seleccionar Insumo Estándar:", list(insumos_dropdown.keys()), key="nr_sel_insumo_dropdown")
+            ins_sel_obj = insumos_dropdown[sel_ins_key]
+
+        with c_add_tipo:
+            tipo_uso = st.radio(
+                "Tipo de elemento:",
+                ["Masa (% Panadero)", "Fijo x Pan (Empaque/Servicio)"],
+                key="nr_radio_tipo_uso"
+            )
+
+        with c_add_pct:
+            if "Masa" in tipo_uso:
+                val_pct = st.number_input("% Panadero (%):", min_value=0.1, max_value=250.0, value=100.0 if ins_sel_obj["categoria"] == "harina" and not any(x.get("es_harina_base") for x in st.session_state["nr_ingredientes"]) else 15.0, step=0.5, key="nr_input_val_pct")
+                es_hb = st.checkbox("¿Es Harina Base (100%)?", value=True if ins_sel_obj["categoria"] == "harina" and not any(x.get("es_harina_base") for x in st.session_state["nr_ingredientes"]) else False, key="nr_chk_es_hb")
+                val_fijo = 0.0
+            else:
+                val_fijo = st.number_input(f"Cantidad x Pan ({ins_sel_obj['unidad_medida']}):", min_value=0.1, max_value=50.0, value=1.0, step=1.0, key="nr_input_val_fijo")
+                val_pct = 0.0
+                es_hb = False
+
+        with c_add_btn:
+            st.write("")
+            st.write("")
+            if st.button("➕ Añadir", key="nr_btn_add_to_list", type="primary"):
+                item_existente = next((idx for idx, x in enumerate(st.session_state["nr_ingredientes"]) if x["ing_id"] == ins_sel_obj["id"]), None)
+                nuevo_elem = {
+                    "ing_id": ins_sel_obj["id"],
+                    "nombre": ins_sel_obj["nombre"],
+                    "categoria": ins_sel_obj["categoria"],
+                    "unidad": ins_sel_obj["unidad_medida"],
+                    "es_harina_base": es_hb,
+                    "pct": float(val_pct),
+                    "fijo": float(val_fijo),
+                    "costo_u": float(ins_sel_obj["costo_unitario"])
+                }
+                if item_existente is not None:
+                    st.session_state["nr_ingredientes"][item_existente] = nuevo_elem
+                else:
+                    st.session_state["nr_ingredientes"].append(nuevo_elem)
+                st.rerun()
+
+        # Tabla visual en tiempo real de los ingredientes que se van añadiendo
+        st.markdown("##### ⚖️ Tabla Visual de Composición de la Receta")
+        
+        lista_actual = st.session_state.get("nr_ingredientes", [])
+
+        if not lista_actual:
+            st.info("ℹ️ Aún no has añadido ingredientes. Selecciona un insumo arriba con su porcentaje y pulsa **➕ Añadir** para armar la receta.")
+        else:
+            suma_pct_masa = sum(x["pct"] for x in lista_actual if x["pct"] > 0)
+            harina_base_total_pct = sum(x["pct"] for x in lista_actual if x.get("es_harina_base")) or 100.0
+            harina_base_g_calculada = (n_peso_crudo / (suma_pct_masa / 100.0)) if suma_pct_masa > 0 else 0.0
+
+            agua_g_calc = 0.0
+            harinas_g_calc = 0.0
+            filas_preview = []
+
+            for idx, item in enumerate(lista_actual):
+                if item["pct"] > 0:
+                    gramos_hogaza = round(harina_base_g_calculada * (item["pct"] / 100.0), 1)
+                    costo_estimado = round(gramos_hogaza * item["costo_u"], 0)
+                    if item.get("es_harina_base"):
+                        harinas_g_calc += gramos_hogaza
+                    if "agua" in item["nombre"].lower() or item["categoria"] == "liquido":
+                        agua_g_calc += gramos_hogaza
+                    rol_txt = "🌾 Harina Base (100%)" if item.get("es_harina_base") else "💧 Ingrediente Masa"
+                    filas_preview.append({
+                        "idx": idx,
+                        "Insumo": item["nombre"],
+                        "Rol / Tipo": rol_txt,
+                        "% Panadero": f"{item['pct']:g}%",
+                        "Por Hogaza (g / u)": f"{gramos_hogaza:g} g",
+                        "Costo Estimado (COP)": baker_math.format_cop(costo_estimado)
+                    })
+                else:
+                    costo_estimado = round(item["fijo"] * item["costo_u"], 0)
+                    filas_preview.append({
+                        "idx": idx,
+                        "Insumo": item["nombre"],
+                        "Rol / Tipo": "📦 Empaque / Fijo",
+                        "% Panadero": "-",
+                        "Por Hogaza (g / u)": f"{item['fijo']:g} {item['unidad']}",
+                        "Costo Estimado (COP)": baker_math.format_cop(costo_estimado)
+                    })
+
+            # Métricas en vivo de la fórmula en construcción
+            hidr_calc = (agua_g_calc / harinas_g_calc * 100.0) if harinas_g_calc > 0 else 0.0
+            pm1, pm2, pm3, pm4 = st.columns(4)
+            pm1.metric("Ingredientes Añadidos", len(lista_actual))
+            pm2.metric("Suma % Masa", f"{suma_pct_masa:g}%")
+            pm3.metric("Hidratación Estimada", f"{hidr_calc:.1f}%")
+            pm4.metric("Harina Base Estimada", f"{round(harina_base_g_calculada, 1)} g / pan")
+
+            # Tabla establecida
+            df_pv = pd.DataFrame(filas_preview)
+            st.dataframe(
+                df_pv[["Insumo", "Rol / Tipo", "% Panadero", "Por Hogaza (g / u)", "Costo Estimado (COP)"]],
+                column_config={
+                    "Insumo": st.column_config.TextColumn("Insumo"),
+                    "Rol / Tipo": st.column_config.TextColumn("Rol / Tipo"),
+                    "% Panadero": st.column_config.TextColumn("% Panadero"),
+                    "Por Hogaza (g / u)": st.column_config.TextColumn("Por Hogaza (g / u)"),
+                    "Costo Estimado (COP)": st.column_config.TextColumn("Costo Estimado (COP)")
+                },
+                use_container_width=True
+            )
+
+            # Botones para retirar ingredientes individuales
+            with st.expander("🗑️ Quitar algún ingrediente de esta lista"):
+                col_del_left, col_del_right = st.columns(2)
+                for item_del in lista_actual:
+                    col_del = col_del_left if lista_actual.index(item_del) % 2 == 0 else col_del_right
+                    with col_del:
+                        if st.button(f"❌ Quitar {item_del['nombre']}", key=f"btn_remove_preview_{item_del['ing_id']}"):
+                            st.session_state["nr_ingredientes"] = [x for x in st.session_state["nr_ingredientes"] if x["ing_id"] != item_del["ing_id"]]
+                            st.rerun()
 
             st.markdown("---")
-            st.markdown("#### 2. Composición de Ingredientes (% de Panadero)")
-            st.caption("La harina base representa el 100%. Todos los demás ingredientes se calculan en proporción a la harina.")
-
-            # Harina Base Principal
-            c_h1, c_h2 = st.columns([3, 1])
-            with c_h1:
-                map_harinas = {h["nombre"]: h["id"] for h in harinas_list}
-                sel_harina_base = st.selectbox("🌾 Harina Base Principal (100%):", list(map_harinas.keys()) if map_harinas else ["Harina de Fuerza 13% Proteína"])
-            with c_h2:
-                pct_h_base = st.number_input("% Harina Base:", value=100.0, disabled=True)
-
-            # Segunda Harina (opcional)
-            c_h2_1, c_h2_2 = st.columns([3, 1])
-            with c_h2_1:
-                opciones_seg_harina = ["(Ninguna - Solo harina base)"] + list(map_harinas.keys())
-                sel_seg_harina = st.selectbox("🌾 Segunda Harina (opcional, ej: Centeno):", opciones_seg_harina)
-            with c_h2_2:
-                pct_seg_harina = st.number_input("% Segunda Harina:", min_value=0.0, max_value=100.0, value=20.0 if sel_seg_harina != "(Ninguna - Solo harina base)" else 0.0, step=5.0)
-
-            # Agua / Líquido
-            c_l1, c_l2 = st.columns([3, 1])
-            with c_l1:
-                map_liq = {l["nombre"]: l["id"] for l in liquidos_list}
-                sel_liquido = st.selectbox("💧 Agua / Líquido Principal:", list(map_liq.keys()) if map_liq else ["Agua Filtrada"])
-            with c_l2:
-                pct_agua = st.number_input("% Hidratación (Agua):", min_value=40.0, max_value=110.0, value=75.0, step=1.0)
-
-            # Fermento / Masa Madre
-            c_f1, c_f2 = st.columns([3, 1])
-            with c_f1:
-                map_ferm = {f["nombre"]: f["id"] for f in fermentos_list}
-                sel_fermento = st.selectbox("🥣 Prefermento / Masa Madre Activa:", list(map_ferm.keys()) if map_ferm else ["Masa Madre Activa 100% Hidratación"])
-            with c_f2:
-                pct_fermento = st.number_input("% Masa Madre:", min_value=5.0, max_value=50.0, value=20.0, step=1.0)
-
-            # Sal
-            c_s1, c_s2 = st.columns([3, 1])
-            with c_s1:
-                map_sal = {s["nombre"]: s["id"] for s in aditivos_list if "sal" in s["nombre"].lower()}
-                opciones_sal = list(map_sal.keys()) if map_sal else [a["nombre"] for a in aditivos_list]
-                sel_sal = st.selectbox("🧂 Sal Marina:", opciones_sal if opciones_sal else ["Sal Marina Fina"])
-            with c_s2:
-                pct_sal = st.number_input("% Sal Marina:", min_value=1.0, max_value=4.0, value=2.0, step=0.1)
-
-            # Aditivo extra opcional (Semillas, Aceite, Dátiles, etc.)
-            c_ad1, c_ad2 = st.columns([3, 1])
-            with c_ad1:
-                map_adit = {a["nombre"]: a["id"] for a in aditivos_list if "sal" not in a["nombre"].lower()}
-                opciones_adit = ["(Ninguno)"] + list(map_adit.keys())
-                sel_aditivo = st.selectbox("🌰 Aditivo Extra Opcional (Semillas, Frutos, etc.):", opciones_adit)
-            with c_ad2:
-                pct_aditivo = st.number_input("% del Aditivo Extra:", min_value=0.0, max_value=50.0, value=15.0 if sel_aditivo != "(Ninguno)" else 0.0, step=1.0)
-
-            # Material de Empaque / Bolsa
-            c_emp1, c_emp2 = st.columns([3, 1])
-            with c_emp1:
-                map_emp = {e["nombre"]: e["id"] for e in empaques_list}
-                opciones_emp = ["(Ninguno)"] + list(map_emp.keys())
-                sel_empaque = st.selectbox("📦 Empaque por Hogaza (opcional):", opciones_emp, index=1 if len(opciones_emp) > 1 else 0)
-            with c_emp2:
-                cant_empaque = st.number_input("Unidades x pan:", min_value=0.0, max_value=10.0, value=1.0 if sel_empaque != "(Ninguno)" else 0.0, step=1.0)
-
-            submit_receta_completa = st.form_submit_button("🚀 Guardar Receta Completa con sus Ingredientes", type="primary")
-
-            if submit_receta_completa and n_nombre:
-                conn = get_connection()
-                cur = conn.cursor()
-                
-                # 1. Guardar receta principal
-                cur.execute("""
-                INSERT INTO recetas (nombre, descripcion, peso_unitario_crudo, peso_unitario_horneado, precio_venta_sugerido, tiempo_horneado_minutos, temperatura_horno_c)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (n_nombre, n_desc, n_peso_crudo, n_peso_horneado, n_precio_sug, n_tiempo_h, n_temp_h))
-                nueva_rec_id = cur.lastrowid
-
-                # Diccionario rápido de IDs por nombre
-                cur.execute("SELECT id, nombre FROM ingredientes")
-                all_ings_dict = {row["nombre"]: row["id"] for row in cur.fetchall()}
-
-                # 2. Guardar Harina Base (100%)
-                if sel_harina_base in all_ings_dict:
+            if st.button("🚀 Guardar Receta Completa con sus Ingredientes", key="btn_guardar_receta_final", type="primary"):
+                if not n_nombre or not n_nombre.strip():
+                    st.error("Por favor ingresa un nombre para la receta.")
+                elif not any(x.get("es_harina_base") or x["pct"] > 0 for x in lista_actual):
+                    st.error("Debes incluir al menos un ingrediente con porcentaje de panadero para la masa.")
+                else:
+                    conn = get_connection()
+                    cur = conn.cursor()
+                    
+                    # 1. Insertar receta en base de datos
                     cur.execute("""
-                    INSERT INTO receta_ingredientes (receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad)
-                    VALUES (?, ?, 1, ?, 0)
-                    """, (nueva_rec_id, all_ings_dict[sel_harina_base], 100.0 if sel_seg_harina == "(Ninguna - Solo harina base)" else (100.0 - pct_seg_harina)))
+                    INSERT INTO recetas (nombre, descripcion, peso_unitario_crudo, peso_unitario_horneado, precio_venta_sugerido, tiempo_horneado_minutos, temperatura_horno_c)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (n_nombre.strip(), n_desc.strip(), n_peso_crudo, n_peso_horneado, n_precio_sug, n_tiempo_h, n_temp_h))
+                    nueva_rec_id = cur.lastrowid
 
-                # 3. Guardar Segunda Harina (si aplica)
-                if sel_seg_harina != "(Ninguna - Solo harina base)" and sel_seg_harina in all_ings_dict and pct_seg_harina > 0:
-                    cur.execute("""
-                    INSERT INTO receta_ingredientes (receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad)
-                    VALUES (?, ?, 1, ?, 0)
-                    """, (nueva_rec_id, all_ings_dict[sel_seg_harina], pct_seg_harina))
+                    # 2. Insertar cada uno de los ingredientes configurados dinámicamente
+                    for ing_guardar in lista_actual:
+                        cur.execute("""
+                        INSERT INTO receta_ingredientes (receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad)
+                        VALUES (?, ?, ?, ?, ?)
+                        """, (
+                            nueva_rec_id,
+                            ing_guardar["ing_id"],
+                            1 if ing_guardar.get("es_harina_base") else 0,
+                            float(ing_guardar.get("pct", 0.0)),
+                            float(ing_guardar.get("fijo", 0.0))
+                        ))
 
-                # 4. Guardar Agua / Líquido
-                if sel_liquido in all_ings_dict and pct_agua > 0:
-                    cur.execute("""
-                    INSERT INTO receta_ingredientes (receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad)
-                    VALUES (?, ?, 0, ?, 0)
-                    """, (nueva_rec_id, all_ings_dict[sel_liquido], pct_agua))
+                    conn.commit()
+                    conn.close()
 
-                # 5. Guardar Prefermento / Masa Madre
-                if sel_fermento in all_ings_dict and pct_fermento > 0:
-                    cur.execute("""
-                    INSERT INTO receta_ingredientes (receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad)
-                    VALUES (?, ?, 0, ?, 0)
-                    """, (nueva_rec_id, all_ings_dict[sel_fermento], pct_fermento))
-
-                # 6. Guardar Sal
-                if sel_sal in all_ings_dict and pct_sal > 0:
-                    cur.execute("""
-                    INSERT INTO receta_ingredientes (receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad)
-                    VALUES (?, ?, 0, ?, 0)
-                    """, (nueva_rec_id, all_ings_dict[sel_sal], pct_sal))
-
-                # 7. Guardar Aditivo extra (si aplica)
-                if sel_aditivo != "(Ninguno)" and sel_aditivo in all_ings_dict and pct_aditivo > 0:
-                    cur.execute("""
-                    INSERT INTO receta_ingredientes (receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad)
-                    VALUES (?, ?, 0, ?, 0)
-                    """, (nueva_rec_id, all_ings_dict[sel_aditivo], pct_aditivo))
-
-                # 8. Guardar Empaque (si aplica)
-                if sel_empaque != "(Ninguno)" and sel_empaque in all_ings_dict and cant_empaque > 0:
-                    cur.execute("""
-                    INSERT INTO receta_ingredientes (receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad)
-                    VALUES (?, ?, 0, 0, ?)
-                    """, (nueva_rec_id, all_ings_dict[sel_empaque], cant_empaque))
-
-                conn.commit()
-                conn.close()
-                st.success(f"🎉 ¡Receta '{n_nombre}' guardada con éxito con todos sus ingredientes vinculados!")
-                st.rerun()
+                    # Limpiar estado temporal y notificar éxito
+                    st.session_state["nr_ingredientes"] = []
+                    st.success(f"🎉 ¡Receta **'{n_nombre}'** guardada con éxito con sus {len(lista_actual)} ingredientes!")
+                    st.rerun()
 
 # ==========================================================
 # MÓDULO 2: COSTOS Y FIJACIÓN DE PRECIOS
