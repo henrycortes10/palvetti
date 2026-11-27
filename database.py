@@ -229,7 +229,69 @@ def migrate_to_cop(conn):
         # Actualizar clientes existentes
         cursor.execute("UPDATE clientes SET tipo_cliente = 'Mayorista' WHERE nombre LIKE '%Bistro%' OR nombre LIKE '%Café%'")
 
+    # Normalizar costos de materias primas a COP realistas si están desfasados o en bulto entero
+    costos_estandar = {
+        "Harina de Fuerza 13% Proteína": 4.5,     # $4.500 / kg -> $4.5 por gramo
+        "Harina Integral de Centeno": 7.2,        # $7.200 / kg -> $7.2 por gramo
+        "Agua Filtrada": 0.05,                   # $0.05 por gramo ($50 por litro)
+        "Masa Madre Activa 100% Hidratación": 5.0,# $5.000 / kg -> $5.0 por gramo
+        "Sal Marina Fina": 2.5,                   # $2.500 / kg -> $2.5 por gramo
+        "Semillas Mixtas (Sésamo, Chía, Girasol)": 22.0, # $22.000 / kg -> $22.0 por gramo
+        "Aceite de Oliva Extra Virgen": 45.0,     # $45.000 / litro -> $45.0 por gramo
+        "Bolsa de Papel Kraft PALVETI": 1200.0,   # $1.200 por unidad
+        " dátiles": 25.0,                        # $25.000 / kg -> $25.0 por gramo
+        "Dátiles": 25.0
+    }
+    for nombre_insumo, c_est in costos_estandar.items():
+        cursor.execute("""
+        UPDATE ingredientes 
+        SET costo_unitario = ? 
+        WHERE (nombre = ? OR nombre LIKE ?) AND (costo_unitario < 0.1 OR costo_unitario > 500 OR costo_unitario = 0.28)
+        """, (c_est, nombre_insumo, f"%{nombre_insumo.strip()}%"))
+
+    # Garantizar insumos de empaque y energéticos adicionales
+    cursor.execute("SELECT id FROM ingredientes WHERE nombre LIKE '%Etiqueta%'")
+    if not cursor.fetchone():
+        cursor.execute("""
+        INSERT INTO ingredientes (nombre, categoria, unidad_medida, stock_actual, stock_minimo, costo_unitario)
+        VALUES ('Etiqueta Adhesiva PALVETI', 'empaque', 'unidad', 500, 100, 350.0)
+        """)
+
+    cursor.execute("SELECT id FROM ingredientes WHERE nombre LIKE '%Gas%' OR nombre LIKE '%Energía%'")
+    if not cursor.fetchone():
+        cursor.execute("""
+        INSERT INTO ingredientes (nombre, categoria, unidad_medida, stock_actual, stock_minimo, costo_unitario)
+        VALUES ('Gas / Energía Proporcional (por hogaza)', 'servicio', 'unidad', 9999, 50, 1500.0)
+        """)
+
+    # Vincular ingredientes a Receta 3 (Focaccia) si no los tiene
+    cursor.execute("SELECT count(*) FROM receta_ingredientes WHERE receta_id = 3")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("SELECT id, nombre FROM ingredientes")
+        ing_dict = {r["nombre"]: r["id"] for r in cursor.fetchall()}
+        focaccia_ings = [
+            (3, ing_dict.get("Harina de Fuerza 13% Proteína", 1), 1, 100.0, 0),
+            (3, ing_dict.get("Agua Filtrada", 3), 0, 80.0, 0),
+            (3, ing_dict.get("Masa Madre Activa 100% Hidratación", 4), 0, 20.0, 0),
+            (3, ing_dict.get("Sal Marina Fina", 5), 0, 2.5, 0),
+            (3, ing_dict.get("Aceite de Oliva Extra Virgen", 7), 0, 8.0, 0),
+            (3, ing_dict.get("Bolsa de Papel Kraft PALVETI", 8), 0, 0, 1.0)
+        ]
+        cursor.executemany("""
+        INSERT INTO receta_ingredientes (receta_id, ingrediente_id, es_harina_base, porcentaje_panadero, cantidad_fija_por_unidad)
+        VALUES (?, ?, ?, ?, ?)
+        """, focaccia_ings)
+
     conn.commit()
+
+def update_ingredient_cost(ingrediente_id, nuevo_costo_unitario):
+    """Actualiza el costo unitario de compra de un ingrediente en la base de datos."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE ingredientes SET costo_unitario = ? WHERE id = ?", (float(nuevo_costo_unitario), int(ingrediente_id)))
+    conn.commit()
+    conn.close()
+    return True
 
 def seed_initial_data(conn):
     cursor = conn.cursor()

@@ -81,7 +81,9 @@ def calculate_production_batch(receta_id, unidades, peso_por_hogaza_g):
                 "porcentaje": r["porcentaje_panadero"],
                 "gramos_por_hogaza": round(gramos_totales / unidades, 1),
                 "gramos_lote": round(gramos_totales, 1),
+                "costo_unitario_compra": r["costo_unitario"],
                 "costo_linea": round(costo_linea, 0),
+                "costo_por_hogaza": round(costo_linea / unidades, 1) if unidades > 0 else 0.0,
                 "stock_actual": r["stock_actual"],
                 "stock_suficiente": r["stock_actual"] >= gramos_totales
             })
@@ -100,13 +102,19 @@ def calculate_production_batch(receta_id, unidades, peso_por_hogaza_g):
                 "porcentaje": 0.0,
                 "gramos_por_hogaza": r["cantidad_fija_por_unidad"],
                 "gramos_lote": cant_total,
+                "costo_unitario_compra": r["costo_unitario"],
                 "costo_linea": round(costo_linea, 0),
+                "costo_por_hogaza": round(costo_linea / unidades, 1) if unidades > 0 else 0.0,
                 "stock_actual": r["stock_actual"],
                 "stock_suficiente": r["stock_actual"] >= cant_total
             })
 
     costo_por_hogaza = costo_total_lote / unidades if unidades > 0 else 0
     hidratacion_calculada = (agua_g / harina_g * 100.0) if harina_g > 0 else 0.0
+
+    # Calcular porcentaje de participación de cada insumo en el costo total
+    for ing in ingredientes_calculados:
+        ing["pct_costo_total"] = round((ing["costo_linea"] / costo_total_lote * 100.0), 1) if costo_total_lote > 0 else 0.0
 
     return {
         "unidades": unidades,
@@ -122,27 +130,102 @@ def calculate_production_batch(receta_id, unidades, peso_por_hogaza_g):
 def calculate_pricing(costo_unitario, tipo_margen, valor_margen):
     """
     Calcula el precio de venta sugerido y la ganancia por unidad en COP.
+    Soporta:
+    - factor_multiplicador: Costo * Factor (ej: Costo * 3.0)
+    - porcentual_margen: Margen sobre Venta (ej: 65% -> Costo / (1 - 0.65))
+    - porcentual_markup: Markup sobre Costo (ej: 200% -> Costo * (1 + 2.0))
+    - monto_fijo: Ganancia fija en COP (ej: Costo + 15000)
     """
     if costo_unitario <= 0:
-        return {"precio_venta": 0.0, "ganancia": 0.0, "margen_real_pct": 0.0}
+        return {
+            "precio_venta": 0.0,
+            "ganancia_por_unidad": 0.0,
+            "margen_real_pct": 0.0,
+            "markup_real_pct": 0.0,
+            "factor_multiplicador": 0.0
+        }
 
-    if tipo_margen == "porcentual_margen":
-        margen_frac = valor_margen / 100.0
+    if tipo_margen == "factor_multiplicador":
+        factor = float(valor_margen)
+        precio = costo_unitario * factor
+    elif tipo_margen == "porcentual_margen":
+        margen_frac = float(valor_margen) / 100.0
         if margen_frac >= 1.0:
             margen_frac = 0.99
         precio = costo_unitario / (1.0 - margen_frac)
     elif tipo_margen == "porcentual_markup":
-        precio = costo_unitario * (1.0 + (valor_margen / 100.0))
+        precio = costo_unitario * (1.0 + (float(valor_margen) / 100.0))
     else: # monto_fijo
-        precio = costo_unitario + valor_margen
+        precio = costo_unitario + float(valor_margen)
 
     ganancia = precio - costo_unitario
     margen_real_pct = (ganancia / precio * 100.0) if precio > 0 else 0.0
+    markup_real_pct = (ganancia / costo_unitario * 100.0) if costo_unitario > 0 else 0.0
+    factor_mult = (precio / costo_unitario) if costo_unitario > 0 else 0.0
 
     return {
         "precio_venta": round(precio, -2), # Redondear a centenas de COP
         "ganancia_por_unidad": round(ganancia, -2),
-        "margen_real_pct": round(margen_real_pct, 1)
+        "margen_real_pct": round(margen_real_pct, 1),
+        "markup_real_pct": round(markup_real_pct, 1),
+        "factor_multiplicador": round(factor_mult, 2)
+    }
+
+def analyze_manual_price(costo_unitario, precio_manual):
+    """
+    Analiza un precio de venta fijo manual contra el costo unitario de producción.
+    Devuelve ganancia neta en dinero, margen %, markup %, factor multiplicador y semáforo de rentabilidad.
+    """
+    costo = float(costo_unitario or 0.0)
+    precio = float(precio_manual or 0.0)
+    ganancia = precio - costo
+    margen_pct = (ganancia / precio * 100.0) if precio > 0 else 0.0
+    markup_pct = (ganancia / costo * 100.0) if costo > 0 else 0.0
+    factor = (precio / costo) if costo > 0 else 0.0
+
+    if precio <= 0 or ganancia < 0:
+        semaforo = "🔴 En Pérdida / Crítico"
+        color_fondo = "#FEE2E2"
+        color_borde = "#EF4444"
+        color_texto = "#991B1B"
+        mensaje = "¡Alerta Crítica! El precio está por debajo del costo de producción. Cada pan vendido genera pérdidas."
+    elif ganancia == 0:
+        semaforo = "⚪ Punto de Equilibrio (Sin Ganancia)"
+        color_fondo = "#F3F4F6"
+        color_borde = "#9CA3AF"
+        color_texto = "#374151"
+        mensaje = "El precio apenas cubre la materia prima. No genera utilidad para cubrir mano de obra ni gastos fijos."
+    elif margen_pct < 35.0:
+        semaforo = "🟠 Margen Ajustado / Riesgoso"
+        color_fondo = "#FEF3C7"
+        color_borde = "#F59E0B"
+        color_texto = "#92400E"
+        mensaje = "Margen bajo (< 35%). Muy sensible a variaciones de harina/energía y con poco colchón operativo."
+    elif margen_pct < 60.0:
+        semaforo = "🟡 Rentabilidad Saludable"
+        color_fondo = "#FEF9C3"
+        color_borde = "#EAB308"
+        color_texto = "#854D0E"
+        mensaje = "Margen comercial estándar (35% - 60%). Cubre gastos y genera utilidad moderada."
+    else:
+        semaforo = "🟢 Excelente Rentabilidad"
+        color_fondo = "#DCFCE7"
+        color_borde = "#22C55E"
+        color_texto = "#166534"
+        mensaje = "¡Margen óptimo (> 60%)! Excelente rentabilidad para panadería artesanal de masa madre."
+
+    return {
+        "costo_unitario": round(costo, 0),
+        "precio_manual": round(precio, 0),
+        "ganancia_neta": round(ganancia, 0),
+        "margen_sobre_venta_pct": round(margen_pct, 1),
+        "markup_sobre_costo_pct": round(markup_pct, 1),
+        "factor_multiplicador": round(factor, 2),
+        "semaforo": semaforo,
+        "color_fondo": color_fondo,
+        "color_borde": color_borde,
+        "color_texto": color_texto,
+        "mensaje": mensaje
     }
 
 def discount_inventory_for_batch(lote_id):

@@ -43,13 +43,17 @@ El asistente leerá todo este archivo y sabrá exactamente qué se ha hecho, qu�
    - Porcentajes panaderos con Harina al 100%.
    - Escalado dinámico por número de piezas y peso por pieza.
    - Inclusión automática de prefermento / masa madre y cálculo exacto de hidratación total.
-2. **💰 2. Costos & Fijación de Precios:**
-   - Precios y costos configurados en **Pesos Colombianos (COP)** (sin decimales innecesarios, ej: `$3.500 COP`).
-   - Cálculo de costo por gramo y margen de ganancia.
+2. **💰 2. Costos & Fijación de Precios (Módulo Financiero y Rentabilidad):**
+   - **Cálculo Automático del Costo de Producción Unitario:** Multiplica dinámicamente los gramos y unidades de la tanda por el costo unitario de cada insumo en inventario, arrojando el costo exacto de producción por hogaza y por tanda completa.
+   - **Desglose Detallado de Materia Prima y Materiales:** Tabla con porción por pan, total de la tanda, costo de adquisición (por kg o por unidad), costo por pan en COP y porcentaje de participación en el costo.
+   - **Sugerencia Automática de Precio de Venta:** Configurable por Factor Multiplicador de Costo (ej: 2.5x, 3.0x, 3.5x), Margen Porcentual sobre Venta (%), Markup sobre Costo (%) o Ganancia Neta Fija en COP.
+   - **Simulador Interactivo de Precio Manual Fijo:** Permite ingresar cualquier precio de venta al público manual y calcula en tiempo real la ganancia neta en dinero por pan, margen real sobre venta, markup sobre costo, factor multiplicador y un semáforo visual de rentabilidad (🟢 Excelente, 🟡 Saludable, 🟠 Ajustado, 🔴 En Pérdida).
+   - Botón directo para guardar el precio analizado como precio de venta oficial en la receta.
 3. **📦 3. Inventario & Materia Prima:**
+   - **Actualizador Rápido de Costos de Compra:** Herramienta para ingresar o actualizar el costo de compra de cualquier insumo en formato humano (Precio por Kilo $/kg, Precio por Bulto/Saco $/saco con cálculo automático al gramo, o Precio por Unidad para empaques y servicios como gas/energía).
    - Descuento automático de inventario al registrar una producción de lote.
    - Registro de entradas de insumos con notificación visual inmediata.
-   - Alerta visual de stock mínimo.
+   - Alerta visual y global de stock mínimo.
 4. **📋 4. Pedidos & Preventa (Lotes):**
    - Directorio de clientes dividido en dos pestañas: **Clientes Minoristas / Retail** y **Clientes Mayoristas (B2B)**.
    - Opciones completas para **Editar** y **Eliminar** pedidos.

@@ -507,12 +507,12 @@ if menu == "🥖 1. Calculadora & Recetas (Núcleo)":
 # MÓDULO 2: COSTOS Y FIJACIÓN DE PRECIOS
 # ==========================================================
 elif menu == "💰 2. Costos & Fijación de Precios":
-    st.markdown('<div class="main-header">💰 Costos de Producción y Fijación de Precios</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Cálculo en Pesos Colombianos (COP) por unidad con margen porcentual o fijo</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">💰 Módulo Financiero de Costos y Rentabilidad</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Cálculo al gramo del costo de producción por tanda y hogaza, simulador de precios y análisis de rentabilidad en COP</div>', unsafe_allow_html=True)
 
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id, nombre, peso_unitario_crudo, precio_venta_sugerido FROM recetas")
+    cur.execute("SELECT id, nombre, peso_unitario_crudo, precio_venta_sugerido FROM recetas ORDER BY nombre")
     recetas = cur.fetchall()
     conn.close()
 
@@ -520,71 +520,199 @@ elif menu == "💰 2. Costos & Fijación de Precios":
         st.warning("No hay recetas disponibles.")
     else:
         rec_map = {r["nombre"]: r for r in recetas}
-        sel_rec_nombre = st.selectbox("Seleccionar Pan para análisis de costos:", list(rec_map.keys()))
-        rec_data = rec_map[sel_rec_nombre]
+        
+        # 1. Parámetros de la Tanda y Receta
+        st.markdown("#### ⚙️ 1. Parámetros de Producción de la Tanda")
+        col_sel_rec, col_unidades, col_peso = st.columns([2, 1, 1])
+        with col_sel_rec:
+            sel_rec_nombre = st.selectbox("Seleccionar Pan / Receta Estandarizada:", list(rec_map.keys()))
+            rec_data = rec_map[sel_rec_nombre]
+        with col_unidades:
+            tanda_unidades = st.number_input("Hogazas en la Tanda:", min_value=1, max_value=500, value=15, step=1, help="Número de unidades producidas en esta hornada/tanda.")
+        with col_peso:
+            tanda_peso = st.number_input("Peso por pieza en crudo (g):", min_value=100.0, max_value=3000.0, value=float(rec_data["peso_unitario_crudo"]), step=50.0)
 
-        calc_unitario = baker_math.calculate_production_batch(rec_data["id"], 1, rec_data["peso_unitario_crudo"])
+        # 2. Cálculo Automático de la Producción
+        calc_lote = baker_math.calculate_production_batch(rec_data["id"], tanda_unidades, tanda_peso)
 
-        if calc_unitario:
-            costo_materia_prima = calc_unitario["costo_total_lote"]
+        if calc_lote and calc_lote["costo_total_lote"] > 0:
+            costo_total_tanda = calc_lote["costo_total_lote"]
+            costo_unitario_pan = calc_lote["costo_por_hogaza"]
+            precio_actual_receta = float(rec_data["precio_venta_sugerido"] or 0.0)
 
-            col_costos, col_simulador = st.columns([1, 1])
+            # Análisis del precio actual registrado en la receta
+            analisis_actual = baker_math.analyze_manual_price(costo_unitario_pan, precio_actual_receta)
 
-            with col_costos:
-                st.markdown("### 📋 Desglose de Costo Unitario")
-                st.markdown(f"**Pan:** {sel_rec_nombre} ({rec_data['peso_unitario_crudo']}g en crudo)")
-                
-                df_ing_costos = pd.DataFrame(calc_unitario["ingredientes"])
-                df_ing_costos["costo_cop"] = df_ing_costos["costo_linea"].apply(baker_math.format_cop)
-                df_ing_costos["Cantidad Formateada"] = df_ing_costos.apply(lambda r: format_stock_qty(r["gramos_por_hogaza"], r["unidad"]), axis=1)
-                st.dataframe(
-                    df_ing_costos[["nombre", "Cantidad Formateada", "unidad", "costo_cop"]].rename(
-                        columns={"nombre": "Insumo", "Cantidad Formateada": "Cantidad", "unidad": "Unidad", "costo_cop": "Costo en COP"}
-                    ),
-                    column_config={
-                        "Insumo": st.column_config.TextColumn("Insumo"),
-                        "Cantidad": st.column_config.TextColumn("Cantidad"),
-                        "Unidad": st.column_config.TextColumn("Unidad"),
-                        "Costo en COP": st.column_config.TextColumn("Costo en COP")
-                    },
-                    use_container_width=True
-                )
-                
-                st.success(f"**Costo Total de Materia Prima por Hogaza:** {baker_math.format_cop(costo_materia_prima)}")
+            # 3. Métricas Principales (KPIs)
+            st.markdown("---")
+            kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+            kpi1.metric("🥖 Costo x Hogaza", baker_math.format_cop(costo_unitario_pan), f"{calc_lote['peso_por_hogaza_g']}g crudo")
+            kpi2.metric("🏷️ Costo Total Tanda", baker_math.format_cop(costo_total_tanda), f"{tanda_unidades} hogazas")
+            kpi3.metric("💵 Precio Actual Receta", baker_math.format_cop(precio_actual_receta))
+            kpi4.metric("📈 Ganancia Actual / Pan", baker_math.format_cop(analisis_actual['ganancia_neta']))
+            kpi5.metric("📊 Margen Actual", f"{analisis_actual['margen_sobre_venta_pct']:.1f}%", f"{analisis_actual['factor_multiplicador']}x Costo")
 
-            with col_simulador:
-                st.markdown("### 🧮 Simulador de Precio y Margen (COP)")
-                
-                tipo_margen = st.radio(
-                    "Método de Fijación de Margen:",
-                    ["Margen Porcentual sobre Venta (%)", "Markup Porcentual sobre Costo (%)", "Ganancia Fija Deseada ($ COP / pan)"]
-                )
-
-                if "sobre Venta" in tipo_margen:
-                    valor_m = st.slider("Margen de Ganancia deseado (%):", min_value=10, max_value=85, value=65, step=5)
-                    tipo_calc = "porcentual_margen"
-                elif "sobre Costo" in tipo_margen:
-                    valor_m = st.slider("Markup sobre costo (%):", min_value=50, max_value=400, value=200, step=10)
-                    tipo_calc = "porcentual_markup"
+            # 4. Desglose Detallado de Materia Prima y Materiales
+            st.markdown("### 📋 Desglose de Costos de Materia Prima y Materiales")
+            df_ing = pd.DataFrame(calc_lote["ingredientes"])
+            
+            def fmt_unit_cost(row):
+                if row["unidad"] == "g":
+                    return f"{baker_math.format_cop(row['costo_unitario_compra'] * 1000)}/kg ({row['costo_unitario_compra']} $/g)"
                 else:
-                    valor_m = st.number_input("Ganancia fija deseada por pan ($ COP):", min_value=1000, max_value=100000, value=15000, step=1000)
-                    tipo_calc = "monto_fijo"
+                    return f"{baker_math.format_cop(row['costo_unitario_compra'])} / {row['unidad']}"
 
-                res_precio = baker_math.calculate_pricing(costo_materia_prima, tipo_calc, valor_m)
+            df_ing["Costo Adquisición"] = df_ing.apply(fmt_unit_cost, axis=1)
+            df_ing["Cant. por Pan"] = df_ing.apply(lambda r: format_stock_qty(r["gramos_por_hogaza"], r["unidad"]), axis=1)
+            df_ing["Total Tanda"] = df_ing.apply(lambda r: format_stock_qty(r["gramos_lote"], r["unidad"]), axis=1)
+            df_ing["Costo en Tanda"] = df_ing["costo_linea"].apply(baker_math.format_cop)
+            df_ing["Costo por Pan"] = df_ing["costo_por_hogaza"].apply(baker_math.format_cop)
+            df_ing["% del Costo"] = df_ing["pct_costo_total"].apply(lambda p: f"{p:.1f}%")
 
-                st.markdown("---")
-                col_p1, col_p2, col_p3 = st.columns(3)
-                col_p1.metric("Precio Venta Sugerido", baker_math.format_cop(res_precio['precio_venta']))
-                col_p2.metric("Ganancia Neta por Pan", baker_math.format_cop(res_precio['ganancia_por_unidad']))
-                col_p3.metric("Margen Real Bruto", f"{res_precio['margen_real_pct']:.1f}%")
+            st.dataframe(
+                df_ing[["nombre", "Cant. por Pan", "Total Tanda", "Costo Adquisición", "Costo por Pan", "Costo en Tanda", "% del Costo"]].rename(
+                    columns={
+                        "nombre": "Insumo / Material",
+                        "Cant. por Pan": "Porción x Pan",
+                        "Total Tanda": f"Total Tanda ({tanda_unidades} u)",
+                        "Costo Adquisición": "Costo de Adquisición",
+                        "Costo por Pan": "Costo x Pan (COP)",
+                        "Costo en Tanda": "Costo Tanda (COP)",
+                        "% del Costo": "% Participación"
+                    }
+                ),
+                column_config={
+                    "Insumo / Material": st.column_config.TextColumn("Insumo / Material"),
+                    "Porción x Pan": st.column_config.TextColumn("Porción x Pan"),
+                    f"Total Tanda ({tanda_unidades} u)": st.column_config.TextColumn(f"Total Tanda ({tanda_unidades} u)"),
+                    "Costo de Adquisición": st.column_config.TextColumn("Costo de Adquisición"),
+                    "Costo x Pan (COP)": st.column_config.TextColumn("Costo x Pan (COP)"),
+                    "Costo Tanda (COP)": st.column_config.TextColumn("Costo Tanda (COP)"),
+                    "% Participación": st.column_config.TextColumn("% Participación")
+                },
+                use_container_width=True
+            )
 
-                if st.button("💾 Actualizar Precio Sugerido en la Receta"):
+            st.markdown("---")
+            
+            # 5. Fijación y Simulación de Precios de Venta
+            col_sugerencia, col_manual = st.columns([1, 1], gap="large")
+
+            with col_sugerencia:
+                st.markdown("### 🧮 Sugerencia Automática de Precio de Venta")
+                st.caption("Calcula el precio óptimo a partir de tu margen deseado o factor multiplicador.")
+
+                metodo_fijacion = st.radio(
+                    "Estrategia de Fijación de Ganancia:",
+                    [
+                        "✖️ Factor Multiplicador de Costo (ej: 2.5x, 3.0x, 3.5x)",
+                        "📊 Margen Porcentual sobre Precio de Venta (%)",
+                        "📈 Markup Porcentual sobre Costo de Producción (%)",
+                        "💵 Ganancia Neta Fija Deseada ($ COP / pan)"
+                    ]
+                )
+
+                if "Factor Multiplicador" in metodo_fijacion:
+                    val_param = st.slider("Factor Multiplicador (Costo × Factor):", min_value=1.5, max_value=6.0, value=3.0, step=0.1, help="Ejemplo: Factor 3.0x significa que el precio es 3 veces el costo de producción.")
+                    tipo_param = "factor_multiplicador"
+                elif "Margen Porcentual" in metodo_fijacion:
+                    val_param = st.slider("Margen de Ganancia deseado sobre Venta (%):", min_value=15, max_value=85, value=65, step=5, help="Porcentaje del precio final de venta que te queda como ganancia bruta.")
+                    tipo_param = "porcentual_margen"
+                elif "Markup Porcentual" in metodo_fijacion:
+                    val_param = st.slider("Markup sobre el Costo (%):", min_value=50, max_value=500, value=200, step=10, help="Porcentaje adicional que le sumas al costo unitario.")
+                    tipo_param = "porcentual_markup"
+                else:
+                    val_param = st.number_input("Ganancia neta fija deseada por hogaza ($ COP):", min_value=1000, max_value=100000, value=15000, step=1000)
+                    tipo_param = "monto_fijo"
+
+                calc_sug = baker_math.calculate_pricing(costo_unitario_pan, tipo_param, val_param)
+                precio_sug = calc_sug["precio_venta"]
+                ganancia_sug = calc_sug["ganancia_por_unidad"]
+                ganancia_tanda_sug = ganancia_sug * tanda_unidades
+
+                st.markdown(f"""
+                <div style="background-color: #F8FAFC; border: 1.5px solid #CBD5E1; border-radius: 10px; padding: 15px; margin-top: 10px;">
+                    <div style="font-size: 0.85rem; color: #64748B; font-weight: 600; text-transform: uppercase;">Precio de Venta Sugerido:</div>
+                    <div style="font-size: 2.1rem; color: #991B1B; font-weight: 800; margin: 4px 0;">{baker_math.format_cop(precio_sug)}</div>
+                    <div style="display: flex; gap: 15px; margin-top: 10px; font-size: 0.95rem;">
+                        <div><b>Ganancia x Pan:</b> <span style="color: #16A34A; font-weight: 700;">+{baker_math.format_cop(ganancia_sug)}</span></div>
+                        <div><b>Margen:</b> <span style="color: #0284C7; font-weight: 700;">{calc_sug['margen_real_pct']}%</span></div>
+                        <div><b>Multiplicador:</b> <span style="font-weight: 700;">{calc_sug['factor_multiplicador']}x</span></div>
+                    </div>
+                    <div style="margin-top: 8px; font-size: 0.9rem; color: #475569;">
+                        <b>Utilidad Proyectada Tanda ({tanda_unidades} panes):</b> <span style="color: #16A34A; font-weight: 700;">+{baker_math.format_cop(ganancia_tanda_sug)}</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                if st.button("💾 Fijar Precio Sugerido como Oficial de la Receta", key="btn_fijar_sugerido", type="primary"):
                     conn = get_connection()
                     cur = conn.cursor()
-                    cur.execute("UPDATE recetas SET precio_venta_sugerido = ? WHERE id = ?", (res_precio["precio_venta"], rec_data["id"]))
+                    cur.execute("UPDATE recetas SET precio_venta_sugerido = ? WHERE id = ?", (precio_sug, rec_data["id"]))
                     conn.commit()
                     conn.close()
-                    st.success(f"Precio de {baker_math.format_cop(res_precio['precio_venta'])} guardado para {sel_rec_nombre}.")
+                    st.success(f"✅ Precio oficial de {baker_math.format_cop(precio_sug)} guardado para {sel_rec_nombre}.")
+                    st.rerun()
+
+            with col_manual:
+                st.markdown("### 🎯 Simulador de Precio de Venta Fijo Manual")
+                st.caption("Ingresa un precio de venta fijo y evalúa en tiempo real tu ganancia neta y margen.")
+
+                precio_manual_input = st.number_input(
+                    "Ingresa el Precio de Venta a Evaluar ($ COP / pan):",
+                    min_value=500,
+                    max_value=200000,
+                    value=int(precio_actual_receta) if precio_actual_receta > 500 else 22000,
+                    step=500,
+                    help="Escribe el precio de venta al público que deseas analizar."
+                )
+
+                analisis_manual = baker_math.analyze_manual_price(costo_unitario_pan, precio_manual_input)
+                ganancia_manual_tanda = analisis_manual["ganancia_neta"] * tanda_unidades
+
+                st.markdown(f"""
+                <div style="background-color: {analisis_manual['color_fondo']}; border: 1.5px solid {analisis_manual['color_borde']}; border-radius: 10px; padding: 15px; margin-top: 10px;">
+                    <div style="font-size: 0.95rem; font-weight: 700; color: {analisis_manual['color_texto']}; display: flex; align-items: center; justify-content: space-between;">
+                        <span>{analisis_manual['semaforo']}</span>
+                        <span style="font-size: 1.3rem; font-weight: 800;">{baker_math.format_cop(analisis_manual['precio_manual'])}</span>
+                    </div>
+                    <p style="font-size: 0.85rem; color: {analisis_manual['color_texto']}; margin: 6px 0 12px 0;">{analisis_manual['mensaje']}</p>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; background: white; border-radius: 8px; padding: 10px;">
+                        <div>
+                            <span style="font-size: 0.8rem; color: #64748B;">Ganancia Neta x Pan:</span><br>
+                            <b style="font-size: 1.05rem; color: {'#16A34A' if analisis_manual['ganancia_neta'] > 0 else '#DC2626'};">
+                                {baker_math.format_cop(analisis_manual['ganancia_neta'])}
+                            </b>
+                        </div>
+                        <div>
+                            <span style="font-size: 0.8rem; color: #64748B;">Margen Real sobre Venta:</span><br>
+                            <b style="font-size: 1.05rem; color: #0284C7;">{analisis_manual['margen_sobre_venta_pct']}%</b>
+                        </div>
+                        <div>
+                            <span style="font-size: 0.8rem; color: #64748B;">Markup sobre Costo:</span><br>
+                            <b style="font-size: 1.05rem; color: #475569;">+{analisis_manual['markup_sobre_costo_pct']}%</b>
+                        </div>
+                        <div>
+                            <span style="font-size: 0.8rem; color: #64748B;">Factor Multiplicador:</span><br>
+                            <b style="font-size: 1.05rem; color: #475569;">{analisis_manual['factor_multiplicador']}x Costo</b>
+                        </div>
+                    </div>
+                    <div style="margin-top: 10px; font-size: 0.9rem; color: {analisis_manual['color_texto']};">
+                        <b>Ganancia Total Tanda ({tanda_unidades} panes):</b> <b>{baker_math.format_cop(ganancia_manual_tanda)}</b>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                if st.button("💾 Guardar este Precio Manual como Oficial de la Receta", key="btn_fijar_manual"):
+                    conn = get_connection()
+                    cur = conn.cursor()
+                    cur.execute("UPDATE recetas SET precio_venta_sugerido = ? WHERE id = ?", (precio_manual_input, rec_data["id"]))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"✅ Precio oficial de {baker_math.format_cop(precio_manual_input)} guardado para {sel_rec_nombre}.")
+                    st.rerun()
+        else:
+            st.info("Esta receta aún no tiene ingredientes vinculados o los costos están en cero. Puedes agregarle ingredientes en el Módulo 1 o actualizar costos en el Módulo 3.")
 
 # ==========================================================
 # MÓDULO 3: INVENTARIO Y MATERIA PRIMA
@@ -638,32 +766,89 @@ elif menu == "📦 3. Inventario & Materia Prima":
 
     df_stock["Estado"] = df_stock.apply(calcular_estado, axis=1)
     df_stock["Costo COP"] = df_stock["costo_unitario"].apply(baker_math.format_cop)
+    df_stock["Costo Referencia"] = df_stock.apply(
+        lambda r: f"{baker_math.format_cop(r['costo_unitario'] * 1000)} / kg" if r["unidad_medida"] == "g" else f"{baker_math.format_cop(r['costo_unitario'])} / {r['unidad_medida']}",
+        axis=1
+    )
     df_stock["id_limpio"] = df_stock["id"].apply(clean_phone_or_code)
     df_stock["Stock Actual Formateado"] = df_stock.apply(lambda r: format_stock_qty(r["stock_actual"], r["unidad_medida"]), axis=1)
     df_stock["Stock Mínimo Formateado"] = df_stock.apply(lambda r: format_stock_qty(r["stock_minimo"], r["unidad_medida"]), axis=1)
 
-    st.markdown("### 📋 Existencias Actuales en Bodega")
+    st.markdown("### 📋 Existencias y Costos de Compra en Bodega")
     st.dataframe(
-        df_stock[["id_limpio", "nombre", "categoria", "Stock Actual Formateado", "Stock Mínimo Formateado", "unidad_medida", "Costo COP", "Estado"]].rename(
+        df_stock[["id_limpio", "nombre", "categoria", "Stock Actual Formateado", "Stock Mínimo Formateado", "unidad_medida", "Costo Referencia", "Estado"]].rename(
             columns={
-                "id_limpio": "ID", "nombre": "Insumo", "categoria": "Categoría",
+                "id_limpio": "ID", "nombre": "Insumo / Material", "categoria": "Categoría",
                 "Stock Actual Formateado": "Stock Actual", "Stock Mínimo Formateado": "Stock Mínimo",
-                "unidad_medida": "Unidad", "Costo COP": "Costo Unitario (COP)"
+                "unidad_medida": "Unidad", "Costo Referencia": "Costo de Compra (Kilo / Unidad)",
+                "Estado": "Estado"
             }
         ),
         column_config={
             "ID": st.column_config.TextColumn("ID"),
-            "Insumo": st.column_config.TextColumn("Insumo"),
+            "Insumo / Material": st.column_config.TextColumn("Insumo / Material"),
             "Categoría": st.column_config.TextColumn("Categoría"),
             "Stock Actual": st.column_config.TextColumn("Stock Actual"),
             "Stock Mínimo": st.column_config.TextColumn("Stock Mínimo"),
             "Unidad": st.column_config.TextColumn("Unidad"),
-            "Costo Unitario (COP)": st.column_config.TextColumn("Costo Unitario (COP)"),
+            "Costo de Compra (Kilo / Unidad)": st.column_config.TextColumn("Costo de Compra (Kilo / Unidad)"),
             "Estado": st.column_config.TextColumn("Estado")
         },
         use_container_width=True
     )
 
+    # ==========================================================
+    # ACTUALIZADOR RÁPIDO DE COSTOS DE MATERIA PRIMA Y MATERIALES
+    # ==========================================================
+    st.markdown("---")
+    st.markdown("### 💵 Actualizador de Costos de Materia Prima y Materiales")
+    st.caption("Modifica o actualiza el costo de adquisición de cualquier harina, empaque (bolsas, etiquetas) o servicios proporcionales (gas/energía).")
+
+    with st.form("form_actualizador_costos_insumo"):
+        ing_dict_costos = {i["nombre"]: i for i in ingredientes}
+        sel_insumo_costo = st.selectbox("Seleccionar Insumo o Material a Actualizar:", list(ing_dict_costos.keys()), key="sel_ins_costo_rapido")
+        obj_insumo = ing_dict_costos[sel_insumo_costo]
+        
+        unidad_ins = obj_insumo["unidad_medida"]
+        costo_act = float(obj_insumo["costo_unitario"])
+        
+        c_cost1, c_cost2 = st.columns([1, 2])
+        
+        with c_cost1:
+            st.info(f"**Insumo:** {obj_insumo['nombre']}\n\n**Categoría:** {obj_insumo['categoria']}\n\n**Unidad:** {unidad_ins}\n\n**Costo Actual Registrado:**\n\n### {baker_math.format_cop(costo_act * 1000 if unidad_ins == 'g' else costo_act)} {'/ kg' if unidad_ins == 'g' else 'por ' + unidad_ins}")
+            
+        with c_cost2:
+            if unidad_ins == "g":
+                modo_ingreso = st.radio(
+                    "¿Cómo compras este insumo?",
+                    ["Precio por Kilo ($ COP / kg)", "Precio por Bulto / Saco ($ COP)", "Precio por Gramo directo ($ COP / g)"],
+                    horizontal=True
+                )
+                if "por Kilo" in modo_ingreso:
+                    precio_kg = st.number_input("Precio de compra por Kilo ($ COP):", min_value=100.0, value=float(max(500.0, costo_act * 1000.0)), step=100.0, help="Ej: $4.500 COP por un kilo de harina de fuerza")
+                    costo_calculado_gramo = precio_kg / 1000.0
+                    st.caption(f"➔ Equivale a: **{costo_calculado_gramo:g} COP por gramo** (se usará en el costeo automático de recetas)")
+                elif "por Bulto" in modo_ingreso:
+                    c_b1, c_b2 = st.columns(2)
+                    with c_b1:
+                        precio_bulto = st.number_input("Precio del Bulto / Saco ($ COP):", min_value=1000.0, value=120000.0, step=1000.0, help="Ej: $120.000 COP por el bulto")
+                    with c_b2:
+                        kilos_bulto = st.number_input("Kilos del Bulto / Saco (kg):", min_value=1.0, value=25.0, step=1.0, help="Peso total del saco en kg (ej: 25 kg o 50 kg)")
+                    costo_calculado_gramo = precio_bulto / (kilos_bulto * 1000.0) if kilos_bulto > 0 else 0.0
+                    st.caption(f"➔ Equivale a: **{baker_math.format_cop(precio_bulto / kilos_bulto)} por kilo** ({costo_calculado_gramo:g} COP por gramo)")
+                else:
+                    costo_calculado_gramo = st.number_input("Precio por Gramo directo ($ COP / g):", min_value=0.01, value=float(max(0.1, costo_act)), step=0.5)
+            else:
+                costo_calculado_gramo = st.number_input(f"Precio de compra por {unidad_ins} ($ COP):", min_value=1.0, value=float(max(10.0, costo_act)), step=50.0, help="Ej: $1.200 por bolsa de papel kraft, $350 por etiqueta, $1.500 por gas/energía por pan")
+
+            btn_act_costo = st.form_submit_button("💾 Guardar y Actualizar Costo de Compra", type="primary")
+            if btn_act_costo:
+                from database import update_ingredient_cost
+                update_ingredient_cost(obj_insumo["id"], costo_calculado_gramo)
+                st.success(f"✅ ¡Costo actualizado para '{obj_insumo['nombre']}'! Nuevo valor: {baker_math.format_cop(costo_calculado_gramo * 1000 if unidad_ins == 'g' else costo_calculado_gramo)} {'/ kg' if unidad_ins == 'g' else 'por ' + unidad_ins}")
+                st.rerun()
+
+    st.markdown("---")
     col_inv1, col_inv2 = st.columns(2)
 
     with col_inv1:
@@ -674,7 +859,15 @@ elif menu == "📦 3. Inventario & Materia Prima":
             insumo_obj = ing_map_nombres[sel_ing_compra]
             
             cant_ing_compra = st.number_input(f"Cantidad a sumar ({insumo_obj['unidad_medida']}):", min_value=0.1, value=10000.0, step=1000.0)
-            nuevo_costo = st.number_input(f"Costo por {insumo_obj['unidad_medida']} en COP (actualizar si cambió):", min_value=0.0, value=float(insumo_obj["costo_unitario"]), step=0.5)
+            
+            # Helper de costo de compra
+            if insumo_obj["unidad_medida"] == "g":
+                costo_kg_default = float(insumo_obj["costo_unitario"] * 1000.0)
+                nuevo_costo_kg = st.number_input("Costo de compra por Kilo en COP (actualizar si cambió):", min_value=0.0, value=costo_kg_default, step=100.0)
+                nuevo_costo = nuevo_costo_kg / 1000.0 if nuevo_costo_kg > 0 else 0.0
+            else:
+                nuevo_costo = st.number_input(f"Costo por {insumo_obj['unidad_medida']} en COP (actualizar si cambió):", min_value=0.0, value=float(insumo_obj["costo_unitario"]), step=50.0)
+            
             referencia_compra = st.text_input("Nota / Factura de Proveedor:", value="Compra semanal molino")
 
             submit_compra = st.form_submit_button("✅ Registrar Entrada y Actualizar Stock", type="primary")
@@ -696,7 +889,6 @@ elif menu == "📦 3. Inventario & Materia Prima":
                 conn.commit()
                 conn.close()
 
-                # Guardar en session_state para mostrar notificación visual evidente
                 st.session_state["ultimo_reabastecimiento"] = {
                     "insumo": sel_ing_compra,
                     "cantidad": cant_ing_compra,
@@ -708,19 +900,24 @@ elif menu == "📦 3. Inventario & Materia Prima":
                 st.rerun()
 
     with col_inv2:
-        st.markdown("### ➕ Registrar Nuevo Insumo al Catálogo")
+        st.markdown("### ➕ Registrar Nuevo Insumo o Material")
         with st.form("form_nuevo_insumo"):
-            n_insumo_nombre = st.text_input("Nombre del Insumo (ej: Harina Integral Orgánica)")
-            n_cat = st.selectbox("Categoría:", ["harina", "liquido", "fermento", "aditivo", "empaque"])
+            n_insumo_nombre = st.text_input("Nombre del Insumo / Material (ej: Harina Integral Orgánica, Bolsa Kraft, Etiquetas)")
+            n_cat = st.selectbox("Categoría:", ["harina", "liquido", "fermento", "aditivo", "empaque", "servicio"])
             n_unidad = st.selectbox("Unidad de Medida:", ["g", "kg", "unidad", "ml"])
             c_s1, c_s2 = st.columns(2)
             with c_s1:
-                n_stock_ini = st.number_input("Stock Inicial:", min_value=0.0, value=25000.0, step=1000.0)
+                n_stock_ini = st.number_input("Stock Inicial:", min_value=0.0, value=25000.0 if n_unidad == "g" else 100.0, step=100.0)
             with c_s2:
-                n_stock_min = st.number_input("Stock Mínimo Alerta:", min_value=0.0, value=5000.0, step=1000.0)
-            n_costo_u = st.number_input("Costo por gramo/unidad en COP ($):", min_value=0.0, value=5.0, step=0.5)
+                n_stock_min = st.number_input("Stock Mínimo Alerta:", min_value=0.0, value=5000.0 if n_unidad == "g" else 20.0, step=10.0)
+            
+            if n_unidad == "g":
+                n_costo_kg = st.number_input("Costo de compra por Kilo ($ COP / kg):", min_value=0.0, value=5000.0, step=100.0)
+                n_costo_u = n_costo_kg / 1000.0
+            else:
+                n_costo_u = st.number_input(f"Costo por {n_unidad} en COP ($):", min_value=0.0, value=1200.0, step=50.0)
 
-            submit_insumo = st.form_submit_button("Crear Insumo")
+            submit_insumo = st.form_submit_button("Crear Insumo / Material")
             if submit_insumo and n_insumo_nombre:
                 conn = get_connection()
                 cur = conn.cursor()
